@@ -13,10 +13,8 @@ use elm_eureka::elm_lexer::{ElmToken,IterLexer};
 fn lex_file(source_path : Box<Path>) -> Vec<ElmToken> {
     let file = File::open(source_path).unwrap();
     let reader = BufReader::new(file);
-    let lex = IterLexer::new(reader.chars().map(|x|{x.unwrap()}));
-    //println!("{:?}",reader.chars().map(|x|{x.unwrap()}).collect::<String>());
+    let lex = IterLexer::new(reader.chars().map( |x| x.unwrap() ));
     lex.collect()
-    //vec![ElmToken::As]
 }
 
 fn lex_and_feedback(

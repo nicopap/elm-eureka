@@ -45,7 +45,7 @@ fn extract_dependencies(value : &Value)
         .as_object()
         .map(|object| { object
                 .keys()
-                .map(|x|{Path::new(x).to_path_buf().into_boxed_path()})
+                .map(|x| Path::new(x).to_path_buf().into_boxed_path() )
                 .collect()
         })
         .ok_or(PackageError::InvalidDependencyFormat)
@@ -57,8 +57,8 @@ fn extract_source_files(value : &Value) -> Vec<Box<Path>>
         .as_array()
         .map(|array| { array
                 .into_iter()
-                .map(|x|{x.as_str().unwrap()})
-                .map(|x|{Path::new(x).to_path_buf().into_boxed_path()})
+                .map(|x| x.as_str().unwrap())
+                .map(|x| Path::new(x).to_path_buf().into_boxed_path())
                 .collect()
             })
         .unwrap_or(Vec::new())
@@ -71,7 +71,7 @@ fn extract_exposed(value : Value) -> Vec<String>
         .as_array()
         .unwrap()
         .into_iter()
-        .map(|x|{String::from(x.as_str().unwrap())})
+        .map(|x| String::from(x.as_str().unwrap()))
         .collect()
 }
 
@@ -135,7 +135,7 @@ fn all_packages_helper(dir : &Path, root : &Path)
         .collect::< Vec<Result<_,_>> >()
         .into_iter()
         .collect::< Result<Vec<_>,_> >()
-        .map(|x| { x.into_iter().flat_map(|x|{x}).collect() })
+        .map(|x|  x.into_iter().flat_map(|x| x).collect() )
 }
 
 // An HashMap which keys are elm module names avaliable in the global name
@@ -151,15 +151,15 @@ fn source_files(infos : PackageInfo)
     let foreign_modules =
         infos.dependencies
             .into_iter()
-            .map(|x|{foreign_dir.join(x)})
-            .map(|ref x| {last_version(x)})
-            .flat_map(|ref x|  {all_exposed_modules(x)});
+            .map(|x| foreign_dir.join(x))
+            .map(|ref x| last_version(x))
+            .flat_map(|ref x|  all_exposed_modules(x));
 
     let local_modules : Vec<(String, Box<Path>)> =
         infos.source_dirs
             .into_iter()
-            .map(move |x| {project_dir.join(x)})
-            .flat_map(|ref x| {all_packages(x).unwrap().into_iter()})
+            .map(move |x| project_dir.join(x))
+            .flat_map(|ref x| all_packages(x).unwrap().into_iter())
             .collect();
 
     Ok(HashMap::from_iter(foreign_modules.chain(local_modules)))

@@ -57,8 +57,7 @@ impl fmt::Debug for ElmToken {
             &ElmToken::LBrace => write!(f, "<{{>"),
             &ElmToken::RBrace => write!(f, "<}}>"),
         }
-    }
-}
+    } }
 
 /// is!(bind_name in sub1 | sub2 | sub3 | ... )
 /// is true if bind_name matches one of the subN patterns
@@ -78,7 +77,11 @@ fn first_char(slice : &str) -> char {
 }
 
 fn is_operator(symbol : char) -> bool {
-    is!(symbol in '+' | '-' | '*' | '/' | '.' | '!' | ':' | '=' | '<' | '>' | '|' | '&' )
+    is!(symbol in
+        '+' | '-' | '*' | '/' | '.' |
+        '!' | ':' | '=' | '<' | '>' |
+        '|' | '&' | '%' | '^' | '#' |
+        '$' | '?' | '@' | '~' | '\\')
 }
 
 ///Tokenify a string to one single token.
@@ -189,7 +192,10 @@ pub fn next_token<I>(input : &mut Peekable<I>)
             // WHITESPACE
             '\r' => { continue },
             '\n' => {
-                if input.peek().map_or(false, |&c| !c.is_whitespace()) {
+                if input.peek().map_or(
+                    false,
+                    |&c| c.is_alphabetic() || c == '('
+                ) {
                     return Some(ElmToken::TopLevel);
                 } else {
                     continue;
