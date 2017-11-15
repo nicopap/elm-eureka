@@ -1,7 +1,7 @@
 #![feature(type_ascription)]
-
 mod parse_packages;
 mod elm_versions;
+pub mod elm_lexer;
 
 use parse_packages::elm_package_info;
 use std::path::Path;
@@ -13,3 +13,4 @@ pub fn package_info(root_dir : &Path)
 {
     elm_package_info(root_dir)
 }
+
