@@ -36,8 +36,33 @@ pub enum ElmToken {
     LBrace,
     RBrace,
     DocComment(String),
+    LBracket,
+    RBracket,
+    Concat,
+    Lambda,
+    RArrow,
+    Case,
+    Of,
+    Underscore,
+    If,
+    Then,
+    Else,
+    Pipe,
+    Assign,
+    TypeDeclr,
+    Type,
+    Alias,
+    Infixr,
+    Infixl,
+    Port,
+    Effect,
+    Where,
+    Let,
+    In,
+    StringLit(String),
+    Number(String),
+    Char(String),
 }
-    //TODO: "effect", "where" for effet module declaration
 
 impl fmt::Debug for ElmToken {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -46,16 +71,42 @@ impl fmt::Debug for ElmToken {
             &ElmToken::LParens => write!(f, "<(>"),
             &ElmToken::RParens => write!(f, "<)>"),
             &ElmToken::Comma => write!(f, "<,>"),
-            &ElmToken::Operator(ref op) => write!(f, "<${}$>", op),
+            &ElmToken::Operator(ref op) => write!(f, "${}$", op),
             &ElmToken::Ellision => write!(f, "<..>"),
-            &ElmToken::Name(ref name) => write!(f, "<{}>", name),
+            &ElmToken::Name(ref name) => write!(f, "_{}_", name),
             &ElmToken::Module => write!(f, "<module>"),
             &ElmToken::Exposing => write!(f, "<exposing>"),
             &ElmToken::Import => write!(f, "<import>"),
             &ElmToken::As => write!(f, "<as>"),
-            &ElmToken::DocComment(_) => write!(f, "<{{-| ....... -}}>"),
+            &ElmToken::DocComment(_) => write!(f, "<{{-| ... -}}>"),
             &ElmToken::LBrace => write!(f, "<{{>"),
             &ElmToken::RBrace => write!(f, "<}}>"),
+            &ElmToken::LBracket => write!(f, "<[>"),
+            &ElmToken::RBracket => write!(f, "<]>"),
+            &ElmToken::Concat => write!(f, "<::>"),
+            &ElmToken::Lambda => write!(f, "<λ>"),
+            &ElmToken::RArrow => write!(f, "<->>"),
+            &ElmToken::Case => write!(f, "<case>"),
+            &ElmToken::Of => write!(f, "<of>"),
+            &ElmToken::Underscore => write!(f, "<_>"),
+            &ElmToken::If => write!(f, "<if>"),
+            &ElmToken::Then => write!(f, "<then>"),
+            &ElmToken::Else => write!(f, "<else>"),
+            &ElmToken::Pipe => write!(f, "<|>"),
+            &ElmToken::Assign => write!(f, "<=>"),
+            &ElmToken::TypeDeclr => write!(f, "<:>"),
+            &ElmToken::Type => write!(f, "<type>"),
+            &ElmToken::Alias => write!(f, "<alias>"),
+            &ElmToken::Infixr => write!(f, "<infixr>"),
+            &ElmToken::Infixl => write!(f, "<infixl>"),
+            &ElmToken::Port => write!(f, "<port>"),
+            &ElmToken::Effect => write!(f, "<effect>"),
+            &ElmToken::Where => write!(f, "<where>"),
+            &ElmToken::Let => write!(f, "<let>"),
+            &ElmToken::In => write!(f, "<in>"),
+            &ElmToken::StringLit(_) => write!(f, "\"..\""),
+            &ElmToken::Number(ref content) => write!(f, "#{}#", content),
+            &ElmToken::Char(ref content) => write!(f, "'{}'", content),
         }
     } }
 
@@ -84,8 +135,16 @@ fn is_operator(symbol : char) -> bool {
         '$' | '?' | '@' | '~' | '\\')
 }
 
+fn is_number(symbol : char) -> bool {
+    is!(symbol in
+        'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'x' |
+        '.' | '0' | '1' | '2' | '3' | '4' | '5' |
+        '6' | '7' | '8' | '9' | '-')
+}
+
 ///Tokenify a string to one single token.
 ///Be sure `text_token` is a valid token without padding whitespaces!
+///Also, certain delimiters are not checked for.
 fn into_token(text_token : &str) -> ElmToken {
     match text_token {
         "module" => ElmToken::Module,
@@ -93,25 +152,53 @@ fn into_token(text_token : &str) -> ElmToken {
         "import" => ElmToken::Import,
         "as" => ElmToken::As,
         ".." => ElmToken::Ellision,
-        "," => ElmToken::Comma,
-        "(" => ElmToken::LParens,
-        ")" => ElmToken::RParens,
         "{" => ElmToken::LBrace,
-        "}" => ElmToken::RBrace,
+        "λ" => ElmToken::Lambda,
+        "\\" => ElmToken::Lambda,
+        "->" => ElmToken::RArrow,
+        "case" => ElmToken::Case,
+        "of" => ElmToken::Of,
+        "if" => ElmToken::If,
+        "then" => ElmToken::Then,
+        "else" => ElmToken::Else,
+        "|" => ElmToken::Pipe,
+        "=" => ElmToken::Assign,
+        ":" => ElmToken::TypeDeclr,
+        "type" => ElmToken::Type,
+        "alias" => ElmToken::Alias,
+        "infixr" => ElmToken::Infixr,
+        "infixl" => ElmToken::Infixl,
+        "port" => ElmToken::Port,
+        "effect" => ElmToken::Effect,
+        "where" => ElmToken::Where,
+        "let" => ElmToken::Let,
+        "in" => ElmToken::In,
 
         op if is_operator(first_char(op)) =>
             ElmToken::Operator(String::from(op)),
 
         word if word.starts_with("{-|") && word.ends_with("-}") =>
             ElmToken::DocComment(String::from(
-                    word.trim_left_matches("{-|").trim_right_matches("-}"))
-            ),
+                    word.trim_left_matches("{-|").trim_right_matches("-}")
+            )),
 
         word if first_char(word).is_alphabetic() =>
             ElmToken::Name(String::from(word)),
 
+        word if first_char(word).is_numeric() =>
+            ElmToken::Number(String::from(word)),
+
+        word if first_char(word) == '"' =>
+            ElmToken::StringLit(String::from(
+                    word.trim_left_matches("\"").trim_right_matches("\"")
+            )),
+
+        word if first_char(word) == '\'' =>
+            ElmToken::Char(String::from(
+                    word.trim_left_matches("'").trim_right_matches("'")
+            )),
         _ =>
-            panic!("into_token didn't get a tokenizable item"),
+            panic!(format!("{{{}}} was not a recognizable token!", text_token)),
     }
 }
 
@@ -176,6 +263,43 @@ fn consume_name<I>(input: &mut Peekable<I>, into: &mut String)
 {
     consume_into(input, into, |c| c.is_alphanumeric() || c == '.')
 }
+///This is a mess. There isn't really indications on the elm
+///site on what number syntax is supported, I'll just pretend
+///number with thrown in abcdefx. is fine. 1-xxxefbae3.2.-..2--.. <- valid
+fn consume_number<I>(input: &mut Peekable<I>, into: &mut String)
+    where I: Iterator<Item=char>
+{
+    consume_into( input, into, is_number)
+}
+///Why use a string to represent the content of a char? well, escape
+///sequences, my dear!
+///Elm has \0999999 (decimal escape) and \xfffff (hex escape)
+///This just makes sure that '\'' doesn't trip up the lexer
+///We intend to parse valid code anyway, we can accept garbage to an
+///extent.
+fn consume_char(input: &mut Iterator<Item=char>, into: &mut String) {
+    let mut prev_is_escape = false;
+    while let Some(c) = input.next() {
+        into.push(c);
+        if c == '\'' && !prev_is_escape {
+            return
+        } else {
+            prev_is_escape = c == '\\' && !prev_is_escape
+        };
+    };
+}
+///This is the same parser as char, just ignores \"
+fn consume_string(input: &mut Iterator<Item=char>, into: &mut String) {
+    let mut prev_is_escape = false;
+    while let Some(c) = input.next() {
+        into.push(c);
+        if c == '"' && !prev_is_escape {
+            return
+        } else {
+            prev_is_escape = c == '\\' && !prev_is_escape
+        };
+    };
+}
 
 ///Spawns tokens while consuming the input stream.
 ///It is basically a GIANT (WOWOW!!) match case inside a
@@ -203,9 +327,12 @@ pub fn next_token<I>(input : &mut Peekable<I>)
             },
             c if c.is_whitespace() => { continue },
             // DELIMITERS
+            '[' => { return Some(ElmToken::LBracket) },
+            ']' => { return Some(ElmToken::RBracket) },
             '(' => { return Some(ElmToken::LParens) },
             ')' => { return Some(ElmToken::RParens) },
             ',' => { return Some(ElmToken::Comma) },
+            '}' => { return Some(ElmToken::RBrace) },
             '{' => {
                 if input.peek().map_or(false, |&c| c == '-') {
                     if let Some(doc) = consume_block_comment(input) {
@@ -217,7 +344,6 @@ pub fn next_token<I>(input : &mut Peekable<I>)
                     return Some(ElmToken::LBrace);
                 };
             },
-            '}' => { return Some(ElmToken::RBrace) },
             // OPERATORS
             c if is_operator(c) => {
                 if c == '-' && input.peek().map_or(false, |&c| c == '-') {
@@ -234,7 +360,24 @@ pub fn next_token<I>(input : &mut Peekable<I>)
                 consume_name(input, &mut into_buffer);
                 return Some(into_token(into_buffer.as_ref()));
             },
-            _ => { return None },
+            '_' => { return Some(ElmToken::Underscore) },
+            //Literals
+            '"' => {
+                let mut into_buffer = String::from("\"");
+                consume_string(input, &mut into_buffer);
+                return Some(into_token(into_buffer.as_ref()));
+            },
+            '\'' => {
+                let mut into_buffer = String::from("'");
+                consume_char(input, &mut into_buffer);
+                return Some(into_token(into_buffer.as_ref()));
+            },
+            c @ '0' ... '9' => {
+                let mut into_buffer : String = to_str!(c);
+                consume_number(input, &mut into_buffer);
+                return Some(into_token(into_buffer.as_ref()));
+            },
+            c => { println!("######{}#####", c); return None },
         }
     };
     return None;
