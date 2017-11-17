@@ -1,4 +1,4 @@
-extern crate serde_json;
+//! Query informations about an elm project
 
 use std::fs::{File, read_dir, DirEntry};
 use std::collections::HashMap;
@@ -7,22 +7,20 @@ use std::error::Error;
 use std::fmt;
 use std::iter::FromIterator;
 
-use self::serde_json::{Value, from_reader};
-
-use elm_versions::ElmVersion;
+use serde_json::{Value, from_reader};
 
 #[derive(Debug)]
 struct PackageInfo {
     project_dir : Box<Path>,
     dependencies: Vec<Box<Path>>,
     source_dirs: Vec<Box<Path>>,
-    elm_version: ElmVersion
 }
 
 #[derive(Debug)]
 enum PackageError {
     InvalidDependencyFormat,
 }
+
 impl fmt::Display for PackageError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "PackageError")
@@ -75,7 +73,16 @@ fn extract_exposed(value : Value) -> Vec<String>
         .collect()
 }
 
-pub fn elm_package_info(root_dir : &Path)
+/// Retreive from the elm project present in `root_dir`
+/// informations about dependencies.
+///
+/// returns a map of the modules avaliable in the global
+/// namespace and the location of their source files.
+///
+/// # Panics
+/// This function may panic, typically if there is
+/// an IO read error.
+pub fn info(root_dir : &Path)
     -> Result<HashMap<String, Box<Path>>, Box<Error>>
 {
     let project_dir = root_dir.to_path_buf().into_boxed_path();
@@ -92,17 +99,10 @@ pub fn elm_package_info(root_dir : &Path)
         dependencies,
         source_dirs,
         project_dir,
-        elm_version : ElmVersion::Elm018
     };
 
     source_files(package_infos)
 }
-
-// Returns the path to the latest version in the given directory
-// panics if there is no directories present in given path, or if the
-// path is invalid.
-// TODO: fn latest_version_in_dir
-
 
 // Returns Vec of the modules present in the directory: a tuple of
 // the module name and the location
@@ -131,17 +131,17 @@ fn all_packages_helper(dir : &Path, root : &Path)
             } else {
                 all_packages_helper(&path, root)
             }
-        } : Result<Vec<(String, Box<Path>)>, Box<Error>> )
+        })
         .collect::< Vec<Result<_,_>> >()
         .into_iter()
         .collect::< Result<Vec<_>,_> >()
         .map(|x|  x.into_iter().flat_map(|x| x).collect() )
 }
 
-// An HashMap which keys are elm module names avaliable in the global name
-// space, and entries (values) are the path to their source code.
-// The globaly available modules are the ones that the explicitely declared
-// dependencies exports AND the one in the various source paths.
+/// An HashMap which keys are elm module names avaliable in the global name
+/// space, and entries (values) are the path to their source code.
+/// The globaly available modules are the ones that the explicitely declared
+/// dependencies exports AND the one in the various source paths.
 fn source_files(infos : PackageInfo)
     -> Result<HashMap<String, Box<Path>>, Box<Error>>
 {

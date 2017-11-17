@@ -3,3 +3,4 @@
 Cargo.lock
 examples/friendsketch
 examples/elm-spa-example
+examples/elmjutsu-5k.elm
