@@ -31,7 +31,7 @@ pub enum ElmToken {
     Operator(String),
     /// Implicit exports (`exposing (..)`)
     Ellision,
-    /// An identifier, `Can.Be.Scopped`
+    /// A variable or type name. `Can.Have.Prefix`
     Name(String),
     /// the `module` keyword.
     Module,
@@ -106,14 +106,8 @@ pub enum ElmToken {
     StringLit(String),
     /// A number literal
     ///
-    /// Note: the lexing code is leanient in what it considers
-    /// a number literals. Currently, [0-9][0-9a-fA-Fx.-]* is
-    /// what is being lexed into a Number.
-    /// This conservative approach helps copping with the
-    /// lake of reference on what constitutes a literal in
-    /// elm.
-    ///
-    /// `1.0e-10`, `0x12ff` are supported, but not `.011` or `10.`
+    /// Note: some cases that shouldn't be accepted are currently
+    /// accepted, such as `[0-9]x[0-9a-fA-F]` and `10.`
     Number(String),
     /// A character literal.
     ///

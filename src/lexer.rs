@@ -55,18 +55,10 @@ fn is_operator(symbol : char) -> bool {
     }
 }
 
-fn is_number(symbol : char) -> bool {
-    match symbol {
-        'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'x' |
-        '.' | '0' | '1' | '2' | '3' | '4' | '5' |
-        '6' | '7' | '8' | '9' | '-' => true,
-        _ => false
-    }
-}
-
 ///Tokenify a string to one single token.
 ///Be sure `text_token` is a valid token without padding whitespaces!
 ///Also, certain delimiters are not checked for.
+///String and character literals are NOT handled, (it will panic)
 fn into_token(text_token : &str) -> ElmToken {
     match text_token {
         "module" => ElmToken::Module,
@@ -107,28 +99,24 @@ fn into_token(text_token : &str) -> ElmToken {
         word if first_char(word).is_alphabetic() =>
             ElmToken::Name(String::from(word)),
 
-        word if first_char(word).is_numeric() =>
+        word if first_char(word).is_digit(10) =>
             ElmToken::Number(String::from(word)),
 
-        word if first_char(word) == '"' =>
-            ElmToken::StringLit(String::from(
-                    word.trim_left_matches("\"").trim_right_matches("\"")
-            )),
-
-        word if first_char(word) == '\'' =>
-            ElmToken::Char(String::from(
-                    word.trim_left_matches("'").trim_right_matches("'")
-            )),
         _ =>
             panic!(format!("{{{}}} was not a recognizable token!", text_token)),
     }
 }
 
 
-///Consumes the content of input that is necessary to build up the full
-///name. Builds up a string into the input "into", untill "predicate"
-///solves.
-///It is similar to take_while, but it returns the last character.
+/// Consumes the content of input that is necessary to build up the full
+/// name. Builds up a string into the input "into", untill "predicate"
+/// solves.
+/// It is similar to take_while, but it returns the last character.
+///
+/// NOTE: on the *consume* functions: they work without the
+/// "opening" character. One needs to provide a `into` String
+/// in which the first character is already written to have
+/// the full token string.
 fn consume_into<I>(
     input: &mut Peekable<I>,
     into: &mut String,
@@ -144,8 +132,13 @@ fn consume_into<I>(
     };
 }
 
-fn consume_line_comment(input: &mut Iterator<Item=char>) {
-    while let Some(c) = input.next() { if c == '\n' { return } };
+fn consume_line_comment<I>(input: &mut Peekable<I>)
+    where I: Iterator<Item=char>
+{
+    while let Some(&c) = input.peek() {
+        if c == '\n' { return }
+        let _ = input.next();
+    };
 }
 
 fn consume_block_comment<I>(input: &mut Peekable<I>)
@@ -187,47 +180,71 @@ fn consume_name<I>(input: &mut Peekable<I>, into: &mut String)
     consume_into(input, into, |c| c.is_alphanumeric() || c == '.')
 }
 
-///This is a mess. There isn't really indications on the elm
-///site on what number syntax is supported, I'll just pretend
-///number with thrown in abcdefx. is fine. 1-xxxefbae3.2.-..2--.. <- valid
+/// Consumes a number literal. A number literal can be one of the
+/// following:
+/// ```
+/// x[0-9a-fA-F]+
+/// [0-9]*(.[0-9]+)?(e[-+]?[0-9]+)?
+/// ```
+/// Currently, also accepts [0-9]x[0-9a-fA-F]+
 fn consume_number<I>(input: &mut Peekable<I>, into: &mut String)
     where I: Iterator<Item=char>
 {
-    consume_into( input, into, is_number)
+    let is_hexa = match input.peek() { Some(&'x') => true, _ => false };
+    if is_hexa {
+        into.push(input.next().unwrap());
+        consume_into(input, into, |c| c.is_digit(16))
+    } else {
+        let mut radix = false;
+        let mut has_digit = false;
+        let mut just_radix = false;
+        while let Some(&c) = input.peek() {
+            match c {
+                val if val.is_digit(10) => { radix = just_radix; },
+                '.' if !has_digit => { has_digit = true; },
+                'e' if !just_radix => { just_radix = true; has_digit = true},
+                '+' | '-' if just_radix && !radix => { radix = just_radix },
+                _ => { return; }
+            }
+            input.next();
+            into.push(c);
+        }
+    };
 }
 
-///Why use a string to represent the content of a char? well, escape
-///sequences, my dear!
-///This just makes sure that '\'' doesn't trip up the lexer
-///We intend to parse valid code anyway, we can accept garbage to an
-///extent.
+/// Why use a string to represent the content of a char? well, escape
+/// sequences, my dear!
+/// This just makes sure that '\'' doesn't trip up the lexer
+/// We intend to parse valid code anyway, we can accept garbage to an
+/// extent.
+/// NOTE: doesn't include the closing ' in the `into` String.
 fn consume_char(input: &mut Iterator<Item=char>, into: &mut String) {
     let mut prev_is_escape = false;
     while let Some(c) = input.next() {
-        into.push(c);
         if c == '\'' && !prev_is_escape {
-            return
-        } else {
-            prev_is_escape = c == '\\' && !prev_is_escape
-        };
+            return;
+        }
+        prev_is_escape = c == '\\' && !prev_is_escape;
+        into.push(c);
     };
 }
 
-///This is the same parser as char, just ignores \"
+/// This is the same parser as char, just ignores \"
+/// NOTE: doesn't include the closing " in the `into` String.
 fn consume_string(input: &mut Iterator<Item=char>, into: &mut String) {
     let mut prev_is_escape = false;
     while let Some(c) = input.next() {
-        into.push(c);
         if c == '"' && !prev_is_escape {
-            return
-        };
+            return;
+        }
         prev_is_escape = c == '\\' && !prev_is_escape;
+        into.push(c)
     };
 }
 
-///Consumes up to the first non-whitespace. returns the proper
-///newline token If there is extra newlines before the next
-///token, the Token is created accordingly.
+/// Consumes up to the first non-whitespace. returns the proper
+/// newline token If there is extra newlines before the next
+/// token, the Token is created accordingly.
 fn consume_newline<I>(input: &mut Peekable<I>, line: i16)
     -> Option<ElmToken>
     where I: Iterator<Item=char>
@@ -241,7 +258,7 @@ fn consume_newline<I>(input: &mut Peekable<I>, line: i16)
             current_line += 1;
             current_column = 0;
         } else {
-            return Some(ElmToken::Newline(current_line, current_column));
+            return Some(ElmToken::Newline(1, current_column));
         }
         input.next();
     };
@@ -352,14 +369,14 @@ impl <Stream: Iterator<Item=char>> Iterator for Lexer<Stream> {
                 '_' => { return Some(ElmToken::Underscore) },
                 //Literals
                 '"' => {
-                    let mut into_buffer = String::from("\"");
+                    let mut into_buffer = String::new();
                     consume_string(input, &mut into_buffer);
-                    return Some(into_token(into_buffer.as_ref()));
+                    return Some(ElmToken::StringLit(into_buffer));
                 },
                 '\'' => {
-                    let mut into_buffer = String::from("'");
+                    let mut into_buffer = String::new();
                     consume_char(input, &mut into_buffer);
-                    return Some(into_token(into_buffer.as_ref()));
+                    return Some(ElmToken::Char(into_buffer));
                 },
                 c @ '0' ... '9' => {
                     let mut into_buffer : String = to_str!(c);
@@ -370,5 +387,63 @@ impl <Stream: Iterator<Item=char>> Iterator for Lexer<Stream> {
             }
         };
         return None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    macro_rules! consumer_test {
+        ($input_value:expr, $buffer_res:expr, $input_remain:expr, $to_test:ident) => (
+            let mut buffer = String::new();
+            let mut input = $input_value.chars().peekable();
+            buffer.push(input.next().unwrap());
+            $to_test(&mut input, &mut buffer);
+            assert_eq!(buffer, $buffer_res);
+            assert_eq!(input.collect::<String>(), $input_remain);
+        )
+    }
+    #[test] fn test_consume_operator() {
+        consumer_test!( "+*--12", "+*--", "12", consume_operator);
+        consumer_test!( "<*| wow |*>", "<*|", " wow |*>", consume_operator);
+    }
+    #[test] fn test_consume_char() {
+        consumer_test!( r#"'\xfff' 10"#, r#"'\xfff"#, " 10", consume_char);
+        consumer_test!( r#"'\\' ten"#, r#"'\\"#, " ten", consume_char);
+        consumer_test!( r#"'\''''"#, r#"'\'"#, "''", consume_char);
+    }
+    #[test] fn test_consume_number() {
+        consumer_test!( "0xabcd-10", "0xabcd", "-10", consume_number);
+        consumer_test!( "10e+34-10", "10e+34", "-10", consume_number);
+        consumer_test!( "3.1415-10", "3.1415", "-10", consume_number);
+    }
+    #[test] fn test_consume_name() {
+        consumer_test!( "Some.test-10", "Some.test", "-10", consume_name);
+    }
+    macro_rules! block_test_boilerplate {
+        ($input_value:expr, $buffer_res:expr, $input_remain:expr) => (
+            let mut input = $input_value.chars().peekable();
+            let content = consume_block_comment(&mut input);
+            assert_eq!(content, $buffer_res);
+            assert_eq!(input.collect::<String>(), $input_remain);
+        )
+    }
+    #[test] fn test_consume_block_comment1() {
+        block_test_boilerplate!("-hello world!!-}float", None, "float");
+    }
+    #[test] fn test_consume_block_comment2() {
+        block_test_boilerplate!(
+            "-hello {-world!!-}float-}remains",
+            None,
+            "remains"
+        );
+    }
+    #[test] fn test_consume_block_comment3() {
+        block_test_boilerplate!(
+            "-|hello {- hi-} world!!-}float",
+            Some(String::from("{-|hello {- hi-} world!!-}")),
+            "float"
+        );
     }
 }
