@@ -109,9 +109,8 @@ fn into_token(text_token : &str) -> ElmToken {
 
 
 /// Consumes the content of input that is necessary to build up the full
-/// name. Builds up a string into the input "into", untill "predicate"
+/// name. Builds up a string into the input "into", until "predicate"
 /// solves.
-/// It is similar to take_while, but it returns the last character.
 ///
 /// NOTE: on the *consume* functions: they work without the
 /// "opening" character. One needs to provide a `into` String
@@ -121,17 +120,22 @@ fn consume_into<I>(
     input: &mut Peekable<I>,
     into: &mut String,
     predicate: fn(char) -> bool
-) where I: Iterator<Item=char> {
+)   where I: Iterator<Item=char>
+{
+    //let mut i = 0;
     while let Some(&c) = input.peek() {
         if predicate(c) {
+            //i += (c == '\n') as i16;
             input.next();
             into.push(c);
         } else {
-            return;
-        };
-    };
+            return ;
+        }
+    }
 }
 
+/// Consumes the rest of a line until '\n' (does
+/// not consume the end of line)
 fn consume_line_comment<I>(input: &mut Peekable<I>)
     where I: Iterator<Item=char>
 {
@@ -141,19 +145,29 @@ fn consume_line_comment<I>(input: &mut Peekable<I>)
     };
 }
 
+/// Consumes a block comment. Handles properly nested
+/// block comments. This function doesn't accumulate
+/// the input into a buffer. Instead, it returns a
+/// string if the comment was a doc comment.
+///
+/// # Returns
+/// `(Some(DocComment), #linesConsumed)`
 fn consume_block_comment<I>(input: &mut Peekable<I>)
-    -> Option<String>
+    -> (Option<String>, i16)
     where I: Iterator<Item=char>
 {
     let mut last = '-';
     let mut depth = 1i64;
+    let mut nl_consumed = 0;
     let mut accum = String::from("{-");
     let is_doc = {
         let second = input.next().unwrap();
         let third = *input.peek().unwrap();
+        nl_consumed += (second == '\n') as i16;
         second == '-' && third == '|'
     };
     while let Some(c) = input.next() {
+        nl_consumed += (c == '\n') as i16;
         if last == '{' && c == '-' {
             depth += 1
         } else if last == '-' && c == '}' {
@@ -162,10 +176,10 @@ fn consume_block_comment<I>(input: &mut Peekable<I>)
         if is_doc { accum.push(c) };
         last = c;
         if depth == 0 {
-            return if is_doc { Some(accum) } else { None }
+            return (if is_doc { Some(accum) } else { None }, nl_consumed)
         };
     };
-    None
+    (None, nl_consumed)
 }
 
 fn consume_operator<I>(input: &mut Peekable<I>, into: &mut String)
@@ -231,38 +245,47 @@ fn consume_char(input: &mut Iterator<Item=char>, into: &mut String) {
 
 /// This is the same parser as char, just ignores \"
 /// NOTE: doesn't include the closing " in the `into` String.
-fn consume_string(input: &mut Iterator<Item=char>, into: &mut String) {
+fn consume_string(input: &mut Iterator<Item=char>, into: &mut String) -> i16 {
     let mut prev_is_escape = false;
+    let mut nl_consumed = 0;
     while let Some(c) = input.next() {
+        nl_consumed += (c == '\n') as i16;
         if c == '"' && !prev_is_escape {
-            return;
+            return nl_consumed;
         }
         prev_is_escape = c == '\\' && !prev_is_escape;
         into.push(c)
-    };
+    }
+    nl_consumed
 }
 
 /// Consumes up to the first non-whitespace. returns the proper
 /// newline token If there is extra newlines before the next
 /// token, the Token is created accordingly.
+///
+/// # Returns
+/// `(Some(parsedToken), #LinesConsumed)`
 fn consume_newline<I>(input: &mut Peekable<I>, line: i16)
-    -> Option<ElmToken>
+    -> (Option<ElmToken>, i16)
     where I: Iterator<Item=char>
 {
-    let mut current_line = line;
-    let mut current_column = 0i16;
+    let mut nl_consumed = 0;
+    let mut current_column = 0;
     while let Some(&c) = input.peek() {
         if c == ' ' {
             current_column += 1;
         } else if c == '\n' {
-            current_line += 1;
+            nl_consumed += 1;
             current_column = 0;
         } else {
-            return Some(ElmToken::Newline(1, current_column));
+            return (
+                Some(ElmToken::Newline(nl_consumed + line, current_column)),
+                nl_consumed
+            );
         }
         input.next();
-    };
-    None
+    }
+    (None, nl_consumed)
 }
 
 
@@ -330,7 +353,11 @@ impl <Stream: Iterator<Item=char>> Iterator for Lexer<Stream> {
             match next_char {
                 // WHITESPACE
                 '\r' => { continue },
-                '\n' => { return consume_newline(input, 0) },
+                '\n' => {
+                    let (token, nl_consumed) = consume_newline(input, self.line_loc + 1);
+                    self.line_loc += nl_consumed + 1;
+                    return token;
+                },
                 c if c.is_whitespace() => { continue },
                 // DELIMITERS
                 '[' => { return Some(ElmToken::LBracket) },
@@ -341,10 +368,15 @@ impl <Stream: Iterator<Item=char>> Iterator for Lexer<Stream> {
                 '}' => { return Some(ElmToken::RBrace) },
                 '{' => {
                     if input.peek().map_or(false, |&c| c == '-') {
-                        if let Some(doc) = consume_block_comment(input) {
-                            return Some(into_token(doc.as_ref()));
-                        } else {
-                            continue;
+                        match consume_block_comment(input) {
+                            (Some(doc), nl_consumed) => {
+                                self.line_loc += nl_consumed;
+                                return Some(into_token(doc.as_ref()));
+                            },
+                            (None, nl_consumed) => {
+                                self.line_loc += nl_consumed;
+                                continue;
+                            }
                         }
                     } else {
                         return Some(ElmToken::LBrace);
@@ -370,7 +402,8 @@ impl <Stream: Iterator<Item=char>> Iterator for Lexer<Stream> {
                 //Literals
                 '"' => {
                     let mut into_buffer = String::new();
-                    consume_string(input, &mut into_buffer);
+                    let nl_consumed = consume_string(input, &mut into_buffer);
+                    self.line_loc += nl_consumed;
                     return Some(ElmToken::StringLit(into_buffer));
                 },
                 '\'' => {
@@ -394,6 +427,70 @@ impl <Stream: Iterator<Item=char>> Iterator for Lexer<Stream> {
 mod tests {
     use super::*;
 
+    macro_rules! s {
+        ($fn_to_call:ident, $str_to_conv:expr) => (
+            $fn_to_call(String::from($str_to_conv))
+        )
+    }
+    const UNORDERED_LIST_EXAMPLE : &str = r#"import Html exposing (li, text, ul)
+import Html.Attributes exposing (class)
+
+
+{-| This {- Hello :)-}
+
+Et maintenant le voyage au supermarché!
+-}
+main =
+  ul [class "grocery-list"]
+    [ li [] [text "Pamplemousse"]
+    , li [] [text "Ananas"]
+    , li [] [text "Jus d'orange"]
+    , li [] [text "Bœuf"]
+    , li [] [text "Soupe du jour"]
+    , li [] [text "Camembert"]
+    , li [] [text "Jacques Cousteau"]
+    , li [] [text "Baguette"]
+    ]
+
+
+-- Thanks to "Flight of the Conchords" for creating "Foux Du Fafa"
+"#;
+
+    #[test] fn test_lexer() {
+        use tokens::ElmToken::*;
+
+        let str_input = String::from(UNORDERED_LIST_EXAMPLE);
+        let char_input = str_input.chars();
+        let lexer = Lexer::new(char_input);
+        let token_vec = lexer.collect::<Vec<_>>();
+        assert_eq!(
+            token_vec, vec![Import, s!(Name,"Html"), Exposing, LParens,
+            s!(Name,"li"), Comma, s!(Name,"text"), Comma, s!(Name,"ul"),
+            RParens, Newline(2, 0), Import, s!(Name,"Html.Attributes"),
+            Exposing, LParens, s!(Name,"class"), RParens, Newline(5,0),
+            DocComment(String::from(r#" This {- Hello :)-}
+
+Et maintenant le voyage au supermarché!
+"#)), Newline(9,0), s!(Name,"main"), Assign,
+            Newline(10,2), s!(Name,"ul"), LBracket, s!(Name,"class"), s!(StringLit,"grocery-list"), RBracket,
+            Newline(11,4),LBracket,s!(Name,"li"),LBracket, RBracket,
+            LBracket, s!(Name,"text"), s!(StringLit,"Pamplemousse"), RBracket,
+            Newline(12,4), Comma, s!(Name,"li"), LBracket, RBracket,
+            LBracket, s!(Name,"text"), s!(StringLit,"Ananas"), RBracket,
+            Newline(13,4), Comma, s!(Name,"li"), LBracket, RBracket,
+            LBracket, s!(Name,"text"), s!(StringLit,"Jus d'orange"), RBracket,
+            Newline(14,4), Comma, s!(Name,"li"), LBracket, RBracket,
+            LBracket, s!(Name,"text"), s!(StringLit,"Bœuf"), RBracket,
+            Newline(15,4), Comma, s!(Name,"li"), LBracket, RBracket,
+            LBracket, s!(Name,"text"), s!(StringLit,"Soupe du jour"), RBracket,
+            Newline(16,4), Comma, s!(Name,"li"), LBracket, RBracket,
+            LBracket, s!(Name,"text"), s!(StringLit,"Camembert"), RBracket,
+            Newline(17,4), Comma, s!(Name,"li"), LBracket, RBracket,
+            LBracket, s!(Name,"text"), s!(StringLit,"Jacques Cousteau"), RBracket,
+            Newline(18,4), Comma, s!(Name,"li"), LBracket, RBracket,
+            LBracket, s!(Name,"text"), s!(StringLit,"Baguette"), RBracket,
+            Newline(19,4), RBracket, Newline(22,0)]);
+    }
     macro_rules! consumer_test {
         ($input_value:expr, $buffer_res:expr, $input_remain:expr, $to_test:ident) => (
             let mut buffer = String::new();
@@ -424,7 +521,7 @@ mod tests {
     macro_rules! block_test_boilerplate {
         ($input_value:expr, $buffer_res:expr, $input_remain:expr) => (
             let mut input = $input_value.chars().peekable();
-            let content = consume_block_comment(&mut input);
+            let (content, _) = consume_block_comment(&mut input);
             assert_eq!(content, $buffer_res);
             assert_eq!(input.collect::<String>(), $input_remain);
         )

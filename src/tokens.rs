@@ -17,6 +17,7 @@ use std::fmt;
 /// by using the `Display` trait. Everything up  to the
 /// indentation should be left intact. Only loss would be
 /// whitespaces and line/block comments.
+#[derive(PartialEq)]
 pub enum ElmToken {
     /// line, column coordinate of token starting a new line.
     Newline(i16,i16),

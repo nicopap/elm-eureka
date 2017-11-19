@@ -1,0 +1,73 @@
+This defines infromaly fromaly the elm grammar
+
+# Terminal symbols
+DocString
+Name // a bare token, such as a variable or type names can have prefix
+Operator
+StringLit
+Number
+Character
+( , ) { } [ ] :: -> | = : .. _
+effect port module where exposing import
+type alias case of if then else let in
+N0 //Newline, with first character at column 0
+Ny //Newline with specific indent
+
+All terminal characters are shown bare,
+nonterminals are delimited in /Slashes/
+I also use <Angled brackets>+ as grouping.
+When something is followed by a
+: + it appears one or more times
+: * it appears zero to N times
+: ? it appears zero or one time
+
+
+/ModuleDecrl/ :=
+ effect module Name where { <Name = /Type/>+ } exposing /ExportList/ N0
+ port module Name exposing /ExportList/ N0
+ module Name exposing /ExportList/ N0
+
+/ExportList/ :=
+ ( .. )
+ (/ExportEntry/ <, /ExportEntry/>* )
+
+/ExportEntry/ :=
+ Name
+ ( Operator )
+ Name ( .. )
+ Name ( Name <, Name>* )
+
+/Import/ :=
+ import Name <as Name>? <exposing /ExportList/>? N0
+
+/TopDeclr/ :=
+ infixr Number Operator N0
+ infixl Number Operator N0
+ DocString N0
+ /TypeDeclr/ N0
+ /TypeAlias/ N0
+ port /FunctionTypeDeclr/ N0
+ /FunctionTypeDeclr/ N0
+ /FunctionDeclr/ N0
+
+/FunctionTypeDeclr/ :=
+ Name : /Type/
+
+/FunctionDeclr/ :=
+ Name </Pattern/>* = /Expr/
+
+/TypeAlias/ :=
+ type alias Name <Name>* = /Type/
+
+/Type/ :=
+ Name </Type/>*
+ { }
+ { <Name |>? Name : /Type/ <, Name : /Type/>* }
+ ( /Type/ <, /Type/>+ )
+ ( /Type/ )
+ /Type/ <-> /Type/>+
+ ( )
+
+/TypeDeclr/ :=
+ type Name <Name>* = Name /Type/ <| Name /Type/>*
+
