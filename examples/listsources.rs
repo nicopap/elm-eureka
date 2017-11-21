@@ -17,7 +17,8 @@ use elm_eureka::lexer::Lexer;
 use elm_eureka::tokens::ElmToken;
 use elm_eureka::packages_reader;
 
-const NTHREAD:i32=4;
+// FIXME: race condition breaks the demo if ran concurrently
+const NTHREAD:i32=1;
 fn lex_file(source_path : Box<Path>) -> Vec<ElmToken> {
     let file = File::open(source_path).unwrap();
     let reader = BufReader::new(file);

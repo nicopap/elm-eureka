@@ -1,7 +1,18 @@
 [package]
-name = "elm_eureka"
+name = "elm-eureka"
+description = "A parser for the elm programming language"
+keywords = ["parser","elm","programming language"]
 version = "0.1.0"
 authors = ["Nicola Papale"]
+build = "build.rs"
+license = "LGPL3"
+
+[build-dependencies.lalrpop]
+git = "https://github.com/nikomatsakis/lalrpop"
+branch = "master"
 
 [dependencies]
 serde_json = "1.0"
+lalrpop-util = "0.13.1"
+either = "1.4.0"
+itertools = "0.7.1"

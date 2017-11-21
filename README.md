@@ -6,25 +6,20 @@ The aim is to facilitate the creation of efficient tooling for the [elm
 programming language](http://elm-lang.org).
 
 
-## Current state
+## Current features
 
-I've just done the lexer. Even then, the lexer is not that accurate, it doesn't
-really vaidate literals.
+* A lexer capable to tokenize all elm constructs from a character iterator.
 
+* A parser that doesn't do a lot: parses the module declaration and possibly
+	the module doc string if it exists.
 
-<!--
-## Features
-
-* A fast parser.
-
-* An API to query the elm AST.
 
 ## Implementation
 
 The architecture is based on the usual lexer+parser passes. Since the goal is
 to have an efficient parser, I made it *lazy*. Lazy in the sense that it will
-only attempt to parse expressions that are *needed* in order to get information
-on the code.
+only attempt to parse expressions *needed* to get a specific information on
+some code.
 
 The typical usecase for the parser is to get the list of exported symbols in a
 file, this usually requires to read the `module` declaration and nothing else!
@@ -36,7 +31,6 @@ Finally, if you want to retreive the type of the exported values, you need only
 to look at a very limited subset of the file. In fact, you don't even need to
 parse any expression.
 
--->
 
 ## Planned (maybe?)
 
@@ -57,14 +51,6 @@ parse any expression.
 
 This library is not built to "verify" code, but to analyse existing code so it
 can help you. If you need a tool to compile or verify elm code, use elm-make :)
-
-Pathological cases are:
-
-* How character literals are handled (they are parsed like strings)
-
-* How number literals are handled (anything starting by a number and containing
-	0123456789abcdefx.- is accepted)
-
 
 ## Features provided by other crates
 

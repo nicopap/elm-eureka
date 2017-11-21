@@ -1,0 +1,99 @@
+use tokens;
+use ast;
+
+grammar;
+
+pub ModuleDeclr: ast::ModuleDeclr = {
+    NameTok "module" <name:NameTok>
+    "where" "{" NameTok "=" NameTok ("," NameTok "=" NameTok)* "}"
+    "exposing" <exports:ExportList> =>
+        ast::ModuleDeclr { <> },
+
+    "port" "module" <name:NameTok> "exposing" <exports:ExportList> =>
+        ast::ModuleDeclr { <> },
+
+    "module" <name:NameTok> "exposing" <exports:ExportList> =>
+        ast::ModuleDeclr { <> },
+};
+
+ExportList: ast::ExportList = {
+    "(" ".." ")" =>
+        ast::ExportList::Unqualified,
+
+    "(" <export_list:Comma<ExportEntry>> ")" =>
+        ast::ExportList::List(export_list),
+};
+
+ExportEntry: ast::ExportEntry = {
+    <NameTok> =>
+        ast::ExportEntry::Name(<>),
+
+    "(" <OperatorTok> ")" =>
+        ast::ExportEntry::Operator(<>),
+
+    <NameTok> "(" ".." ")" =>
+        ast::ExportEntry::WithAllConstructors(<>),
+
+    <name:NameTok> "(" <vals:Comma<NameTok>> ")" =>
+        ast::ExportEntry::WithConstructors(name, vals),
+
+};
+
+Comma<T>: Vec<T> = {
+    <v:(<T> ",")*> <e:T?> => match e {
+        None => v,
+        Some(e) => {
+            let mut v = v;
+            v.push(e);
+            v
+        }
+    }
+};
+
+extern {
+    type Location = usize;
+    type Error = tokens::LexError;
+
+    enum tokens::ElmToken {
+        NewlineTok => tokens::ElmToken::Newline(<i16>,<i16>),
+        "(" => tokens::ElmToken::LParens,
+        ")" => tokens::ElmToken::RParens,
+        "," => tokens::ElmToken::Comma,
+        OperatorTok => tokens::ElmToken::Operator(<String>),
+        ".." => tokens::ElmToken::Ellision,
+        NameTok => tokens::ElmToken::Name(<String>),
+        "module" => tokens::ElmToken::Module,
+        "exposing" => tokens::ElmToken::Exposing,
+        "import" => tokens::ElmToken::Import,
+        "as" => tokens::ElmToken::As,
+        "{" => tokens::ElmToken::LBrace,
+        "}" => tokens::ElmToken::RBrace,
+        DocCommentTok => tokens::ElmToken::DocComment(<String>),
+        "[" => tokens::ElmToken::LBracket,
+        "]" => tokens::ElmToken::RBracket,
+        "lambda" => tokens::ElmToken::Lambda,
+        "->" => tokens::ElmToken::RArrow,
+        "case" => tokens::ElmToken::Case,
+        "of" => tokens::ElmToken::Of,
+        "_" => tokens::ElmToken::Underscore,
+        "if" => tokens::ElmToken::If,
+        "then" => tokens::ElmToken::Then,
+        "else" => tokens::ElmToken::Else,
+        "|" => tokens::ElmToken::Pipe,
+        "=" => tokens::ElmToken::Assign,
+        ":" => tokens::ElmToken::TypeDeclr,
+        "type" => tokens::ElmToken::Type,
+        "alias" => tokens::ElmToken::Alias,
+        "infixr" => tokens::ElmToken::Infixr,
+        "infixl" => tokens::ElmToken::Infixl,
+        "port" => tokens::ElmToken::Port,
+        "where" => tokens::ElmToken::Where,
+        "let" => tokens::ElmToken::Let,
+        "in" => tokens::ElmToken::In,
+        StringTok => tokens::ElmToken::StringLit(<String>),
+        NumberTok => tokens::ElmToken::Number(<String>),
+        CharTok => tokens::ElmToken::Char(<String>),
+    }
+}
+
+// vim: ft=rust

@@ -83,7 +83,6 @@ fn into_token(text_token : &str) -> ElmToken {
         "infixr" => ElmToken::Infixr,
         "infixl" => ElmToken::Infixl,
         "port" => ElmToken::Port,
-        "effect" => ElmToken::Effect,
         "where" => ElmToken::Where,
         "let" => ElmToken::Let,
         "in" => ElmToken::In,
@@ -191,7 +190,7 @@ fn consume_operator<I>(input: &mut Peekable<I>, into: &mut String)
 fn consume_name<I>(input: &mut Peekable<I>, into: &mut String)
     where I: Iterator<Item=char>
 {
-    consume_into(input, into, |c| c.is_alphanumeric() || c == '.')
+    consume_into(input, into, |c| c.is_alphanumeric() || c == '.' || c == '_')
 }
 
 /// Consumes a number literal. A number literal can be one of the
@@ -272,17 +271,17 @@ fn consume_newline<I>(input: &mut Peekable<I>, line: i16)
     let mut nl_consumed = 0;
     let mut current_column = 0;
     while let Some(&c) = input.peek() {
-        if c == ' ' {
-            current_column += 1;
-        } else if c == '\n' {
-            nl_consumed += 1;
-            current_column = 0;
-        } else {
-            return (
-                Some(ElmToken::Newline(nl_consumed + line, current_column)),
-                nl_consumed
-            );
-        }
+        match c {
+            ' ' => {current_column += 1},
+            '\n' => {nl_consumed += 1; current_column = 0},
+            _ => {
+                let this_line = nl_consumed + line;
+                return (
+                     Some( ElmToken::Newline(this_line, current_column) ),
+                     nl_consumed
+                )
+            },
+        };
         input.next();
     }
     (None, nl_consumed)
@@ -346,12 +345,10 @@ impl <Stream: Iterator<Item=char>> Iterator for Lexer<Stream> {
     /// # Errors
     /// The stream may terminate early for
     /// undeterminate reasons, mostly broken code
-    fn next(&mut self) -> Option<ElmToken>
-    {
+    fn next(&mut self) -> Option<ElmToken> {
         let input = &mut self.input;
         while let Some(next_char) = input.next() {
             match next_char {
-                // WHITESPACE
                 '\r' => { continue },
                 '\n' => {
                     let (token, nl_consumed) = consume_newline(input, self.line_loc + 1);
@@ -359,7 +356,6 @@ impl <Stream: Iterator<Item=char>> Iterator for Lexer<Stream> {
                     return token;
                 },
                 c if c.is_whitespace() => { continue },
-                // DELIMITERS
                 '[' => { return Some(ElmToken::LBracket) },
                 ']' => { return Some(ElmToken::RBracket) },
                 '(' => { return Some(ElmToken::LParens) },
@@ -382,7 +378,6 @@ impl <Stream: Iterator<Item=char>> Iterator for Lexer<Stream> {
                         return Some(ElmToken::LBrace);
                     };
                 },
-                // OPERATORS
                 c if is_operator(c) => {
                     if c == '-' && input.peek().map_or(false, |&c| c == '-') {
                         consume_line_comment(input);
@@ -392,14 +387,12 @@ impl <Stream: Iterator<Item=char>> Iterator for Lexer<Stream> {
                     consume_operator(input, &mut into_buffer);
                     return Some(into_token(into_buffer.as_ref()));
                 },
-                // NAMES
                 c if c.is_alphabetic() => {
                     let mut into_buffer : String = to_str!(c);
                     consume_name(input, &mut into_buffer);
                     return Some(into_token(into_buffer.as_ref()));
                 },
                 '_' => { return Some(ElmToken::Underscore) },
-                //Literals
                 '"' => {
                     let mut into_buffer = String::new();
                     let nl_consumed = consume_string(input, &mut into_buffer);
@@ -423,8 +416,7 @@ impl <Stream: Iterator<Item=char>> Iterator for Lexer<Stream> {
     }
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(test)] mod tests {
     use super::*;
 
     macro_rules! s {

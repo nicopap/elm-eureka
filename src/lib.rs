@@ -25,10 +25,13 @@
 //! * Other crates would implement the actual user-facing part of dev tools. One
 //!   can imagine a completion manager with caching, or a dependency graph
 //!   generator etc.
-
 extern crate serde_json;
+extern crate itertools;
+extern crate either;
 
 pub mod tokens;
 pub mod packages_reader;
 pub mod lexer;
+pub mod parser;
 pub mod ast;
+mod elm_parse;

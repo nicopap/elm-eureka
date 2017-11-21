@@ -1,23 +1,24 @@
-//! Parses a token stream
+//! Datastructures to support an elm AST
+//!
+//! The AST is built around meaningfull data
+//! rather than code representation. Though
+//! it should be fine to convert back to code
+//! from the AST, with minor loss.
 
+use either::Either;
+use either::Either::{Left,Right};
 use tokens::ElmToken;
-use std::iter::Peekable;
-use std::error::Error;
-use std::fmt;
 
-
-#[derive(Debug)] pub struct ElmDoc(String);
-
-pub struct Path(String);
 pub type Name=String;
 pub type Operator=String;
 
-
-pub enum ElmExports {
+#[derive(Debug,Clone)]
+pub enum ExportList {
     Unqualified,
     List(Vec<ExportEntry>),
 }
 
+#[derive(Debug,Clone)]
 pub enum ExportEntry {
     Name(Name),
     Operator(Operator),
@@ -25,33 +26,46 @@ pub enum ExportEntry {
     WithAllConstructors(Name),
 }
 
-pub enum ModuleAttribute {
-    Usual,
-    Port,
-    Effect { command: Option<Name>, subscription: Option<Name> },
+#[derive(Debug,Clone)]
+pub struct ModuleDeclr {
+    pub name: Name,
+    pub exports: ExportList,
 }
 
-pub struct ElmModule {
-    name: Path,
-    exports: ElmExports,
-    attribute: ModuleAttribute,
-}
-
+#[derive(Debug,Clone)]
 pub struct ElmImport {
-    global_name: Path,
-    local_name: Path,
-    exposes: Option<ElmExports>,
+    global_name: Name,
+    local_name: Name,
+    exposes: ExportList,
 }
 
-struct ElmSource {
-    module_declaration: ElmModule,
-    doc_string: Option<ElmDoc>,
-    imports: Vec<ElmImport>,
-    // TODO: rest of elm source
+pub struct LazilyParsed<I,T>(Either<I,Option<T>>)
+    where I: Iterator<Item=ElmToken>;
+
+impl <I,T>LazilyParsed<I,T>
+    where I: Iterator<Item=ElmToken>,
+          T: Parsable<I> + Sized
+{
+    fn content(self) -> Option<T> {
+        match self.0 {
+            Left(unparsed) => T::parse(unparsed),
+            Right(parsed) => parsed,
+        }
+    }
+    fn evaluate(self) -> LazilyParsed<I,T> {
+        match self.0 {
+            Left(unparsed) => LazilyParsed(Right(T::parse(unparsed))),
+            Right(_) => self,
+        }
+    }
 }
 
-// Notes: a few adaptation must be done to the ElmToken stream in order
-// to not trip up the parser:
-// - N0's need to be nubed (de-doubled)
-// - All leading N0's must be removed
-// - Add one terminal N0
+/// An entity (usually a node of the AST) that can be parsed
+/// from an ordered collection of tokens.
+pub trait Parsable<I>
+    where I: Iterator<Item=ElmToken>,
+          Self: Sized,
+{
+    /// parse, with success or failure
+    fn parse(I) -> Option<Self>;
+}

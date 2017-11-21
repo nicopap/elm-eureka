@@ -1,17 +1,6 @@
 This defines infromaly fromaly the elm grammar
 
-# Terminal symbols
-DocString
-Name // a bare token, such as a variable or type names can have prefix
-Operator
-StringLit
-Number
-Character
-( , ) { } [ ] :: -> | = : .. _
-effect port module where exposing import
-type alias case of if then else let in
-N0 //Newline, with first character at column 0
-Ny //Newline with specific indent
+# Notes
 
 All terminal characters are shown bare,
 nonterminals are delimited in /Slashes/
@@ -21,9 +10,24 @@ When something is followed by a
 : * it appears zero to N times
 : ? it appears zero or one time
 
+# Terminal symbols
 
-/ModuleDecrl/ :=
- effect module Name where { <Name = /Type/>+ } exposing /ExportList/ N0
+DocString
+Name // a bare token, such as a variable or type names can have prefix
+Operator
+StringLit
+Number
+Character
+( , ) { } [ ] :: -> | = : .. _
+port module where exposing import
+type alias case of if then else let in
+N0 //Newline, with first character at column 0
+Ny //Newline with specific indent
+
+# Nonterminal symbols
+
+/ModuleDeclr/ :=
+ Name module Name where { <Name = Name>+ } exposing /ExportList/ N0
  port module Name exposing /ExportList/ N0
  module Name exposing /ExportList/ N0
 
