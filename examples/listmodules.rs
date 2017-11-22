@@ -74,12 +74,19 @@ pub fn main() {
             ExportList::Unqualified => format!("{}", "unqualified"),
             ExportList::List(ref exports) => format!("{:?}", exports),
         };
-        println!(
-            "\n#### {} ####\nname: {},\nexports: {}\nhas doc: {}",
+        let module_imports = format!("{:?}", tree.get_imports());
+        println!("
+            #### {} ####
+            name: {}
+            exports: {}
+            has doc: {}
+            imports: {}
+            ",
             module,
             module_name,
             module_exports,
-            module_doc
+            module_doc,
+            module_imports
         );
     }
 }

@@ -16,6 +16,13 @@ pub ModuleDeclr: ast::ModuleDeclr = {
         ast::ModuleDeclr { <> },
 };
 
+pub Import: ast::ElmImport = {
+    "import" <global_name:NameTok>
+    <local_name:("as" <NameTok>)?>
+    <exposes:("exposing" <ExportList>)?> =>
+        ast::ElmImport{ <> },
+};
+
 ExportList: ast::ExportList = {
     "(" ".." ")" =>
         ast::ExportList::Unqualified,

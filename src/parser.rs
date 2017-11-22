@@ -5,7 +5,7 @@ use std::iter::{Peekable,SkipWhile};
 use itertools::{Coalesce,Itertools};
 
 use ast;
-use elm_parse::parse_ModuleDeclr;
+use elm_parse::{parse_ModuleDeclr,parse_Import};
 use tokens::{ElmToken,LexError};
 use self::ElmToken::{DocComment, Newline};
 
@@ -25,6 +25,15 @@ struct StageModuleDoc {
 struct StageImports {
     pub module_declr: ast::ModuleDeclr,
     pub module_doc: Option<String>,
+}
+
+// Possible alternate implementation to keep in mind:
+// Have an iterator over the Imports rather than
+// collect them directly into a Vec (but fuck that!)
+struct StageTopDeclrs {
+    pub module_declr: ast::ModuleDeclr,
+    pub module_doc: Option<String>,
+    pub module_imports: Vec<ast::ElmImport>,
 }
 
 /// A parser with different levels of processing state.
@@ -62,7 +71,9 @@ struct StageImports {
 /// 2. ModuleDoc: `next_step` will consume the module
 ///    doc string (if it exists).
 ///
-/// 3. Imports: does not implement `next_step`.
+/// 3. Imports: `next_step` will consume all the imports
+///
+/// 4. TopDeclrs: does not implement `next_step`.
 ///
 /// Further stages will be added as I refine the design
 /// of the parser.
@@ -103,6 +114,7 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I, StageModuleDeclr> {
 
 impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageModuleDeclr> {
     fn next_step(mut self) -> StreamParser<I,StageModuleDoc> {
+        // Consumes the module declaration, also consumes the next newline.
         let declr_stream : Vec<SpanToken> =
             self.input
                 .by_ref()
@@ -121,18 +133,52 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageModuleDeclr> {
 
 impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageModuleDoc> {
     fn next_step(mut self) -> StreamParser<I,StageImports> {
-        let has_doc = is_match!(Some(&DocComment(_)))(self.input.peek());
-        let module_doc =
-            if has_doc {
-                self.input.next().and_then( |x| match x {
-                    DocComment(val) => Some(val),
+        // Consumes the doc string if existant.
+        match self.input.peek() {
+            Some(&DocComment(_)) => {
+                let module_declr = self.stage.module_declr;
+                let module_doc = match self.input.next() {
+                    Some(DocComment(content)) => Some(content),
                     _ => None,
-                })
-            } else { None };
+                };
+                self.input.next().expect("Sourcefile with only doc and module declr");
+                StreamParser {
+                    input: self.input,
+                    stage: StageImports{module_declr, module_doc},
+                }
+            },
+            _ => {
+                let module_declr = self.stage.module_declr;
+                let module_doc = None;
+                StreamParser {
+                    input: self.input,
+                    stage: StageImports{module_declr, module_doc},
+                }
+            },
+        }
+    }
+}
+
+impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageImports> {
+    fn next_step(mut self) -> StreamParser<I,StageTopDeclrs> {
+        let mut module_imports : Vec<ast::ElmImport> = Vec::new();
+        while self.input.peek() == Some(&ElmToken::Import) {
+            let import_stream : Vec<SpanToken> =
+                self.input
+                    .by_ref()
+                    .take_while(not_match!(ElmToken::Newline(_,0)))
+                    .filter(not_match!(ElmToken::Newline(_,_)))
+                    .enumerate()
+                    .map(|(i, token)| Ok((i, token, i+1)))
+                    .collect();
+            let cur_import = parse_Import(import_stream).expect("Parsing Error");
+            module_imports.push(cur_import);
+        }
         let module_declr = self.stage.module_declr;
+        let module_doc = self.stage.module_doc;
         StreamParser {
             input: self.input,
-            stage: StageImports{module_declr, module_doc},
+            stage: StageTopDeclrs{module_declr, module_doc, module_imports},
         }
     }
 }
@@ -141,14 +187,21 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageModuleDoc> {
 pub struct Parser {
     module_declr: ast::ModuleDeclr,
     module_doc: Option<String>,
+    imports: Vec<ast::ElmImport>,
 }
 
 impl Parser {
     pub fn new<I>(input: I) -> Parser where I:Iterator<Item=ElmToken> {
-        let stream_parsed = StreamParser::new(input).next_step().next_step().stage;
+        let stream_parsed =
+            StreamParser::new(input)
+                .next_step()
+                .next_step()
+                .next_step()
+                .stage;
         Parser {
             module_declr: stream_parsed.module_declr,
             module_doc: stream_parsed.module_doc,
+            imports: stream_parsed.module_imports,
         }
     }
     pub fn get_module_doc(&self) -> &Option<String> {
@@ -156,5 +209,8 @@ impl Parser {
     }
     pub fn get_module_declr(&self) -> &ast::ModuleDeclr {
         &self.module_declr
+    }
+    pub fn get_imports(&self) -> &Vec<ast::ElmImport> {
+        &self.imports
     }
 }

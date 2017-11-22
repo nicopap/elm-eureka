@@ -34,9 +34,9 @@ pub struct ModuleDeclr {
 
 #[derive(Debug,Clone)]
 pub struct ElmImport {
-    global_name: Name,
-    local_name: Name,
-    exposes: ExportList,
+    pub global_name: Name,
+    pub local_name: Option<Name>,
+    pub exposes: Option<ExportList>,
 }
 
 pub struct LazilyParsed<I,T>(Either<I,Option<T>>)

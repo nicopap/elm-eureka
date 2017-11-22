@@ -10,8 +10,8 @@ programming language](http://elm-lang.org).
 
 * A lexer capable to tokenize all elm constructs from a character iterator.
 
-* A parser that doesn't do a lot: parses the module declaration and possibly
-	the module doc string if it exists.
+* A parser that doesn't do a lot: parses the module declaration, possibly the
+	module declaration if it exists, and the import declarations.
 
 
 ## Implementation
