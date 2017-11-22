@@ -39,7 +39,8 @@ fn lex_and_feedback(
 
 pub fn main() {
     let packagepath = Path::new("examples/elm-spa-example");
-    let mut sources = packages_reader::info( packagepath).unwrap();
+    let source_info = packages_reader::info(packagepath).unwrap();
+    let sources = source_info.dependencies.into_iter().chain(source_info.source_files.into_iter());
 
     let (send_processed, receive_processed) = channel();
     let mut send_channels : Vec<Sender<Option<(Box<Path>, String)>>> = Vec::new();
@@ -50,7 +51,7 @@ pub fn main() {
         send_channels.push(send_paths);
     }
     let mut i = 0i32;
-    for (module_name, source_path) in sources.drain() {
+    for (module_name, source_path) in sources {
         send_channels
             .index_mut((i % NTHREAD) as usize)
             .send(Some((source_path, module_name)))

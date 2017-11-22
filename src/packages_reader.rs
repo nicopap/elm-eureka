@@ -4,111 +4,68 @@ use std::fs::{File, read_dir, DirEntry};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::error::Error;
-use std::fmt;
-use std::iter::FromIterator;
+use itertools::Itertools;
 
 use serde_json::{Value, from_reader};
+use serde_json::map::Map;
 
 #[derive(Debug)]
-struct PackageInfo {
-    project_dir : Box<Path>,
-    dependencies: Vec<Box<Path>>,
-    source_dirs: Vec<Box<Path>>,
-}
-
-#[derive(Debug)]
-enum PackageError {
-    InvalidDependencyFormat,
-}
-
-impl fmt::Display for PackageError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "PackageError")
-    }
-}
-impl Error for PackageError {
-    fn description(&self) -> &str {
-        match self {
-            &PackageError::InvalidDependencyFormat =>
-                "Couldn't parse dependencies specification in elm-stuff/exact-dependencies.json"
-            ,
-        }
-    }
-}
-
-fn extract_dependencies(value : &Value)
-    -> Result<Vec<Box<Path>>,PackageError>
-{
-    value["dependencies"]
-        .as_object()
-        .map(|object| { object
-                .keys()
-                .map(|x| Path::new(x).to_path_buf().into_boxed_path() )
-                .collect()
-        })
-        .ok_or(PackageError::InvalidDependencyFormat)
-}
-
-fn extract_source_files(value : &Value) -> Vec<Box<Path>>
-{
-    value["source-directories"]
-        .as_array()
-        .map(|array| { array
-                .into_iter()
-                .map(|x| x.as_str().unwrap())
-                .map(|x| Path::new(x).to_path_buf().into_boxed_path())
-                .collect()
-            })
-        .unwrap_or(Vec::new())
-}
-
-// Extracts from JSON Value the exposed modules
-fn extract_exposed(value : Value) -> Vec<String>
-{
-    value["exposed-modules"]
-        .as_array()
-        .unwrap()
-        .into_iter()
-        .map(|x| String::from(x.as_str().unwrap()))
-        .collect()
+pub struct PackageInfo {
+    /// The path to the root of the elm project (in fact,
+    /// this is where the elm-package.json is located)
+    pub project_dir : Box<Path>,
+    /// A map of module names to the location of the name
+    /// relative to the root of the project.
+    pub dependencies: HashMap<String, Box<Path>>,
+    /// the source files of the elm package.
+    pub source_files: HashMap<String, Box<Path>>,
 }
 
 /// Retreive from the elm project present in `root_dir`
 /// informations about dependencies.
 ///
-/// returns a map of the modules avaliable in the global
-/// namespace and the location of their source files.
+/// Returns relevent informations on the package.
 ///
 /// # Panics
 /// This function may panic, typically if there is
 /// an IO read error.
-pub fn info(root_dir : &Path)
-    -> Result<HashMap<String, Box<Path>>, Box<Error>>
-{
+pub fn info(root_dir : &Path) -> Result<PackageInfo, Box<Error>> {
     let project_dir = root_dir.to_path_buf().into_boxed_path();
-
+    let foreign_dir = project_dir.join("elm-stuff/packages");
     let dep_file = root_dir.join("elm-package.json");
     let file = File::open(dep_file)?;
     let value : Value = from_reader(file)?;
+    let dependencies =
+        value["dependencies"]
+            .as_object()
+            .unwrap_or(&Map::new())
+            .keys()
+            .map(|x| Path::new(x).to_path_buf().into_boxed_path() )
+            .map(|x| foreign_dir.join(x))
+            .map(|ref x| last_version(x))
+            .flat_map(|ref x|  all_exposed_modules(x))
+            .collect::<HashMap<String, Box<Path>>>();
 
-    let dependencies = extract_dependencies(&value)?;
+    let source_files =
+        value["source-directories"]
+            .as_array()
+            .unwrap_or(&Vec::new())
+            .into_iter()
+            .map(|x| x.as_str().unwrap())
+            .map(|x| Path::new(x).to_path_buf().into_boxed_path())
+            .flat_map(|ref x| all_packages(&project_dir.join(x)).unwrap().into_iter())
+            .collect::<HashMap<String, Box<Path>>>();
 
-    let source_dirs = extract_source_files(&value);
-
-    let package_infos = PackageInfo {
+    Ok(PackageInfo {
         dependencies,
-        source_dirs,
+        source_files,
         project_dir,
-    };
-
-    source_files(package_infos)
+    })
 }
 
 // Returns Vec of the modules present in the directory: a tuple of
 // the module name and the location
-fn all_packages(dir :&Path)
-    -> Result<Vec<(String, Box<Path>)>, Box<Error>>
-{
+fn all_packages(dir :&Path) -> Result<Vec<(String, Box<Path>)>, Box<Error>> {
     all_packages_helper(dir, dir)
 }
 
@@ -135,58 +92,27 @@ fn all_packages_helper(dir : &Path, root : &Path)
         .collect::< Vec<Result<_,_>> >()
         .into_iter()
         .collect::< Result<Vec<_>,_> >()
-        .map(|x|  x.into_iter().flat_map(|x| x).collect() )
-}
-
-/// An HashMap which keys are elm module names avaliable in the global name
-/// space, and entries (values) are the path to their source code.
-/// The globaly available modules are the ones that the explicitely declared
-/// dependencies exports AND the one in the various source paths.
-fn source_files(infos : PackageInfo)
-    -> Result<HashMap<String, Box<Path>>, Box<Error>>
-{
-    let project_dir = infos.project_dir;
-    let foreign_dir = project_dir.join("elm-stuff/packages");
-
-    let foreign_modules =
-        infos.dependencies
-            .into_iter()
-            .map(|x| foreign_dir.join(x))
-            .map(|ref x| last_version(x))
-            .flat_map(|ref x|  all_exposed_modules(x));
-
-    let local_modules : Vec<(String, Box<Path>)> =
-        infos.source_dirs
-            .into_iter()
-            .map(move |x| project_dir.join(x))
-            .flat_map(|ref x| all_packages(x).unwrap().into_iter())
-            .collect();
-
-    Ok(HashMap::from_iter(foreign_modules.chain(local_modules)))
+        .map(|x|  x.into_iter().flatten().collect())
 }
 
 // In a directory `path` containing directories which names are based on
-// semantic versioning, return the path to the directory representing the
-// latest release.
-fn last_version(path : &Path) -> Box<Path>
-{
-    read_dir(path)
-        .unwrap()
-        .last().unwrap().unwrap()
-        .path()
-        .into_boxed_path()
+// semantic versioning. Returns one of them (may panic, may not be the last
+// version).
+fn last_version(path : &Path) -> Box<Path> {
+    read_dir(path).unwrap().last().unwrap().unwrap().path().into_boxed_path()
 }
 
 // With given project directory, returns a list of tuples associating
 // elm exposed module names with the file in which they were implemented.
-fn all_exposed_modules(project_root : &Path)
-    -> Vec<(String, Box<Path>)>
-{
+fn all_exposed_modules(project_root : &Path) -> Vec<(String, Box<Path>)> {
     let file = File::open(project_root.join("elm-package.json")).unwrap();
     let value : Value = from_reader(file).unwrap();
 
-    extract_exposed(value)
+    value["exposed-modules"]
+        .as_array()
+        .unwrap()
         .into_iter()
+        .map(|x| String::from(x.as_str().unwrap()))
         .map(move |exposed| {
             let exposed_copy = exposed.clone();
             let mut root_copy = project_root.clone().join("src");
