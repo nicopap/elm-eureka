@@ -3,11 +3,13 @@
 use std::iter::{Peekable,SkipWhile};
 
 use itertools::{Coalesce,Itertools};
+use either::Either;
+use either::Either::{Left,Right};
 
 use ast;
-use elm_parse::{parse_ModuleDeclr,parse_Import};
+use elm_parse::{parse_ModuleDeclr,parse_Import, parse_TopDeclr};
 use tokens::{ElmToken,LexError};
-use self::ElmToken::{DocComment, Newline};
+use self::ElmToken::{DocComment, Newline, Name, LParens, Port};
 
 type SpanToken = Result<(usize, ElmToken, usize), LexError>;
 
@@ -34,6 +36,13 @@ struct StageTopDeclrs {
     pub module_declr: ast::ModuleDeclr,
     pub module_doc: Option<String>,
     pub module_imports: Vec<ast::ElmImport>,
+}
+
+struct StageEof {
+    pub module_declr: ast::ModuleDeclr,
+    pub module_doc: Option<String>,
+    pub module_imports: Vec<ast::ElmImport>,
+    pub top_levels: Vec<Either<Vec<SpanToken>,ast::TopDeclr>>,
 }
 
 /// A parser with different levels of processing state.
@@ -73,10 +82,10 @@ struct StageTopDeclrs {
 ///
 /// 3. Imports: `next_step` will consume all the imports
 ///
-/// 4. TopDeclrs: does not implement `next_step`.
+/// 4. TopDeclrs: parses the rest of the file until EOF.
+///    (currently only parses type declarations)
 ///
-/// Further stages will be added as I refine the design
-/// of the parser.
+/// 5. EOF: Nothing more to be parsed.
 struct StreamParser<I: Iterator<Item=ElmToken>, Stage> {
     input : OMG<I>,
     stage : Stage,
@@ -98,6 +107,8 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I, StageModuleDeclr> {
         let remove_dup_newlines : CoalSig<ElmToken> = |prev,cur| {
             match (prev,cur) {
                 (Newline(_,0), Newline(x,0)) => Ok(Newline(x,0)),
+                (ElmToken::Type, Name(ref content)) if content == "alias" =>
+                    Err((ElmToken::Type, ElmToken::Alias)),
                 (prev_, cur_) => Err((prev_, cur_)),
             }
         };
@@ -183,27 +194,96 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageImports> {
     }
 }
 
+impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageTopDeclrs> {
+    fn next_step(mut self) -> StreamParser<I,StageEof> {
+        // TODO: this is flawed because it doesn't capture lazily the
+        // tokens for a type declaration.
+        // TODO: Needs function and function type parsing.
+        let mut top_levels = Vec::new();
+        loop {
+            match self.input.peek() {
+                Some(&Name(_)) | Some(&LParens) | Some(&Port) => {
+                    let unparsed_tokens : Vec<SpanToken> =
+                        self.input
+                            .by_ref()
+                            .take_while(not_match!(ElmToken::Newline(_,0)))
+                            .enumerate()
+                            .map(|(i, token)| Ok((i, token, i+1)))
+                            .collect();
+                    top_levels.push(Left(unparsed_tokens));
+                },
+                Some(_) => {
+                    let toplevel_stream : Vec<SpanToken> =
+                        self.input
+                            .by_ref()
+                            .take_while(not_match!(ElmToken::Newline(_,0)))
+                            .filter(not_match!(ElmToken::Newline(_,_)))
+                            .enumerate()
+                            .map(|(i, token)| Ok((i, token, i+1)))
+                            .collect();
+                    top_levels.push(Right(
+                        parse_TopDeclr(toplevel_stream)
+                            .expect("Parsing Error")
+                    ));
+                },
+                None  => {
+                    break;
+                },
+            }
+        }
+        let module_declr = self.stage.module_declr;
+        let module_doc = self.stage.module_doc;
+        let module_imports = self.stage.module_imports;
+        StreamParser {
+            input: self.input,
+            stage: StageEof {
+                module_declr,
+                module_doc,
+                module_imports,
+                top_levels,
+            },
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Parser {
     module_declr: ast::ModuleDeclr,
     module_doc: Option<String>,
     imports: Vec<ast::ElmImport>,
+    top_levels: Vec<ast::TopDeclr>,
 }
 
+/// This needs a lot of work. Planned features:
+///
+/// * Lazily evaluate the source file rather than collect
+///   preemptively all the AST
+///
+/// * Better API, including:
+///   * association between symbols in various location of the AST
+///
+/// Maybe this role is better filed with another data structure,
+/// which would be exposed to the outside world?
 impl Parser {
     pub fn new<I>(input: I) -> Parser where I:Iterator<Item=ElmToken> {
         let stream_parsed =
             StreamParser::new(input)
-                .next_step()
-                .next_step()
-                .next_step()
+                .next_step().next_step().next_step().next_step()
                 .stage;
+        let proc_top_levels =
+            stream_parsed.top_levels
+                .into_iter()
+                .map(Either::right)
+                .flat_map(|op| op.into_iter())
+                .collect();
         Parser {
             module_declr: stream_parsed.module_declr,
             module_doc: stream_parsed.module_doc,
             imports: stream_parsed.module_imports,
+            top_levels: proc_top_levels,
         }
     }
+
     pub fn get_module_doc(&self) -> &Option<String> {
         &self.module_doc
     }
@@ -212,5 +292,19 @@ impl Parser {
     }
     pub fn get_imports(&self) -> &Vec<ast::ElmImport> {
         &self.imports
+    }
+    pub fn get_types(&self) -> (Vec<&ast::TypeAlias>, Vec<&ast::TypeDeclr>) {
+        use ast::TopDeclr::{TypeAlias,TypeDeclr};
+        let type_aliases =
+            self.top_levels.iter()
+                .map(|x| match x { &TypeAlias(ref v) => Some(v), _ => None })
+                .flat_map(|op| op.into_iter())
+                .collect::<Vec<&ast::TypeAlias>>();
+        let type_declrs =
+            self.top_levels.iter()
+                .map(|x| match x { &TypeDeclr(ref v) => Some(v), _ => None })
+                .flat_map(|op| op.into_iter())
+                .collect::<Vec<&ast::TypeDeclr>>();
+        (type_aliases, type_declrs)
     }
 }

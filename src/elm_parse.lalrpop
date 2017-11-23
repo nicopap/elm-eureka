@@ -1,5 +1,8 @@
 use tokens;
 use ast;
+use std::str::FromStr;
+use ast::TopDeclr;
+use either::Either;
 
 grammar;
 
@@ -14,13 +17,6 @@ pub ModuleDeclr: ast::ModuleDeclr = {
 
     "module" <name:NameTok> "exposing" <exports:ExportList> =>
         ast::ModuleDeclr { <> },
-};
-
-pub Import: ast::ElmImport = {
-    "import" <global_name:NameTok>
-    <local_name:("as" <NameTok>)?>
-    <exposes:("exposing" <ExportList>)?> =>
-        ast::ElmImport{ <> },
 };
 
 ExportList: ast::ExportList = {
@@ -44,6 +40,102 @@ ExportEntry: ast::ExportEntry = {
     <name:NameTok> "(" <vals:Comma<NameTok>> ")" =>
         ast::ExportEntry::WithConstructors(name, vals),
 
+};
+
+pub Import: ast::ElmImport = {
+    "import" <global_name:NameTok>
+    <local_name:("as" <NameTok>)?>
+    <exposes:("exposing" <ExportList>)?> =>
+        ast::ElmImport{ <> },
+};
+
+pub TopDeclr: TopDeclr = {
+    "infixr" <priority:NumberTok> <operator:OperatorTok> =>
+        TopDeclr::OperPriority(ast::OperPriority {
+            associativity: Either::Right(()),
+            priority: u8::from_str(priority.as_str()).unwrap(),
+            operator : operator,
+        }),
+
+    "infixl" <priority:NumberTok> <operator:OperatorTok> =>
+        TopDeclr::OperPriority(ast::OperPriority {
+            associativity: Either::Left(()),
+            priority: u8::from_str(priority.as_str()).unwrap(),
+            operator : operator,
+        }),
+
+    <DocCommentTok> =>
+        TopDeclr::DocString(<>),
+
+    "type" <name:NameTok> <type_variables:NameTok*> "="
+    <first_alt:(<NameTok> <EnclosedType*>)>
+    <next_alts:("|"<NameTok> <EnclosedType*>)*> => {
+        let mut alternatives : Vec<(String, Vec<ast::Type>)> = next_alts;
+        alternatives.insert(0,first_alt);
+        TopDeclr::TypeDeclr(ast::TypeDeclr{name,type_variables,alternatives})
+    },
+
+    "type" "alias" <name:NameTok> <type_variables:NameTok*> "=" <type_:Type> =>
+        TopDeclr::TypeAlias(ast::TypeAlias{<>}),
+    // "port" <NameTok> ":" <Type> =>
+    //     {},
+    // <NameTok> ":" <Type> =>
+    //     {},
+    // <NameTok> <Pattern*> "=" <Expression> =>
+    //     {},
+};
+
+Type: ast::Type = {
+    <name:NameTok> <arguments:EnclosedType+> =>
+        ast::Type::Application(name, arguments),
+
+    //TODO: Either a b -> List c is invalid with this grammar
+    // <EnclosedType> <("->" <Type>)+> =>
+    //     ast::Type::Function(<>),
+
+    <EnclosedType> =>
+        <>,
+};
+
+EnclosedType: ast::Type = {
+    "{" "}" =>
+        ast::Type::EmptyRecord,
+
+    "(" ")" =>
+        ast::Type::UnitType,
+
+    <name:NameTok> =>
+        if name.chars().nth(0).map(|x| x.is_lowercase()) == Some(true) {
+            ast::Type::Variable(name)
+        } else {
+            ast::Type::Terminal(name)
+        },
+
+    "(" <Type> ")" =>
+        <>,
+
+    "(" <first:Type> <nexts:("," <Type>)+> ")" => {
+        let mut types = nexts;
+        types.insert(0,first);
+        ast::Type::Tuple(types)
+    },
+
+    "{" <first_fied:(<NameTok> ":" <Type>)>
+    <next_fields:("," <NameTok> ":" <Type>)*> "}" => {
+        let variable_over = None;
+        let mut fields : Vec<(String, ast::Type)> = next_fields;
+        fields.insert(0, first_fied);
+        ast::Type::Record(ast::Record { variable_over, fields })
+    },
+
+    "{" <variable_over:NameTok> "|"
+    <first_fied:(<NameTok> ":" <Type>)>
+    <next_fields:("," <NameTok> ":" <Type>)*> "}" => {
+        let variable_over = Some(variable_over);
+        let mut fields : Vec<(String, ast::Type)> = next_fields;
+        fields.insert(0, first_fied);
+        ast::Type::Record(ast::Record { variable_over, fields })
+    },
 };
 
 Comma<T>: Vec<T> = {

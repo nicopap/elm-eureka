@@ -2,6 +2,8 @@ This defines infromaly fromaly the elm grammar
 
 # Notes
 
+## Syntax
+
 All terminal characters are shown bare,
 nonterminals are delimited in /Slashes/
 I also use <Angled brackets>+ as grouping.
@@ -9,6 +11,31 @@ When something is followed by a
 : + it appears one or more times
 : * it appears zero to N times
 : ? it appears zero or one time
+
+## Newline handling
+
+The Newline handling is a bit wonky: Mostly, only Newlines followed by
+a token starting at the first column are of meaning, but inside expressions
+they are important.
+
+Getting rid of meaningless newline tokens is extremly useful for parsing,
+but we need to know when to do so. What I did to handle them is that:
+
+* Have a "pre-parse" phase dividing the token stream in N top level
+  declarations (divide on N0).
+
+* Depending on which part of the source file we are processing, simply
+  remove the non-toplevel newlines and then feed the token stream into
+  the pertinent parser.
+
+* When we know the given toplevel declaration contains an expression, keep
+  the newline tokens when feeding them to the parser.
+
+## Lazy parsing
+
+To avoid needless computation (parsing expressions or type declaration), I
+(plan to) only parse subsets of declarations and stock the remaining tokens
+in a data structure so I can parse them later if needed.
 
 # Terminal symbols
 
@@ -18,7 +45,7 @@ Operator
 StringLit
 Number
 Character
-( , ) { } [ ] :: -> | = : .. _
+( , ) { } [ ] -> | = : .. _
 port module where exposing import
 type alias case of if then else let in
 N0 //Newline, with first character at column 0
@@ -48,30 +75,24 @@ Ny //Newline with specific indent
  infixr Number Operator N0
  infixl Number Operator N0
  DocString N0
- /TypeDeclr/ N0
- /TypeAlias/ N0
- port /FunctionTypeDeclr/ N0
- /FunctionTypeDeclr/ N0
- /FunctionDeclr/ N0
-
-/FunctionTypeDeclr/ :=
- Name : /Type/
-
-/FunctionDeclr/ :=
- Name </Pattern/>* = /Expr/
-
-/TypeAlias/ :=
- type alias Name <Name>* = /Type/
+ type alias Name <Name>* = /Type/ N0
+ type Name <Name>* = Name </EnclosedType/>* <| Name </EnclosedType/>*>* N0
+ port Name : /Type/ N0
+ Name : /Type/ N0
+ Name </Pattern/>* = /Expression/ N0
+ ( Operator ) : /Type/ N0
+ ( Operator ) </Pattern/>* = /Expression/ N0
 
 /Type/ :=
- Name </Type/>*
+ Name </EnclosedType/>+
+ /Type/ <-> /Type/>+
+ /EnclosedType/
+
+/EnclosedType/ :=
  { }
  { <Name |>? Name : /Type/ <, Name : /Type/>* }
  ( /Type/ <, /Type/>+ )
  ( /Type/ )
- /Type/ <-> /Type/>+
  ( )
-
-/TypeDeclr/ :=
- type Name <Name>* = Name /Type/ <| Name /Type/>*
+ Name
 

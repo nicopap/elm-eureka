@@ -79,7 +79,6 @@ fn into_token(text_token : &str) -> ElmToken {
         "=" => ElmToken::Assign,
         ":" => ElmToken::TypeDeclr,
         "type" => ElmToken::Type,
-        "alias" => ElmToken::Alias,
         "infixr" => ElmToken::Infixr,
         "infixl" => ElmToken::Infixl,
         "port" => ElmToken::Port,

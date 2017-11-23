@@ -8,10 +8,13 @@ programming language](http://elm-lang.org).
 
 ## Current features
 
-* A lexer capable to tokenize all elm constructs from a character iterator.
+* A lexer capable of tokenizing all elm constructs from a character iterator.
 
-* A parser that doesn't do a lot: parses the module declaration, possibly the
-	module declaration if it exists, and the import declarations.
+* A parser capable of parsing:
+	* Module declarations
+	* Documentation comments
+	* Import declarations
+	* Type declarations
 
 
 ## Implementation
@@ -34,7 +37,7 @@ parse any expression.
 
 ## Planned (maybe?)
 
-* An efficient parser capable of building an elm AST.
+* An efficient parser capable of building an elm AST lazily.
 
 * Proper line location tracking, so you can retreive the location of the
 	definition of some functions.
@@ -46,15 +49,3 @@ parse any expression.
 	can imagine a completion manager with caching, or a dependency graph
 	generator etc.
 
-<!--
-## Nonfeatures
-
-This library is not built to "verify" code, but to analyse existing code so it
-can help you. If you need a tool to compile or verify elm code, use elm-make :)
-
-## Features provided by other crates
-
-* Proper dependency anaylsis for namespace based completion suggestions.
-
-* Caching so the whole project doesn't need to be parsed every time.
--->
