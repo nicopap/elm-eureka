@@ -31,6 +31,27 @@ but we need to know when to do so. What I did to handle them is that:
 * When we know the given toplevel declaration contains an expression, keep
   the newline tokens when feeding them to the parser.
 
+## Indentation management
+
+In expressions, newline tokens that are not top level matter. When we know
+we are parsing an expression, we need to selectively keep only the newline
+tokens that are meaningfull (so as to not bloat the grammar with a bunch
+of tokens that must be ignored).
+
+"scan" the token stream, keeping in memory a stack of identation level we
+need to look for:
+
+* before `let` add, indent
+
+* first pattern expression after an `of` keyword, add indent
+
+* first declaration after a `let`, add indent
+
+* when adding an indent that is lower than the current top of the stack,
+  pop all indents greater that the new one
+
+* eliminate all non-significant indents.
+
 ## Lazy parsing
 
 To avoid needless computation (parsing expressions or type declaration), I
