@@ -129,8 +129,8 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageModuleDeclr> {
         let declr_stream : Vec<SpanToken> =
             self.input
                 .by_ref()
-                .take_while(not_match!(ElmToken::Newline(_,0)))
-                .filter(not_match!(ElmToken::Newline(_,_)))
+                .take_while(not_match!(Newline(_,0)))
+                .filter(not_match!(Newline(_,_)))
                 .enumerate()
                 .map(|(i, token)| Ok((i, token, i+1)))
                 .collect();
@@ -177,8 +177,8 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageImports> {
             let import_stream : Vec<SpanToken> =
                 self.input
                     .by_ref()
-                    .take_while(not_match!(ElmToken::Newline(_,0)))
-                    .filter(not_match!(ElmToken::Newline(_,_)))
+                    .take_while(not_match!(Newline(_,0)))
+                    .filter(not_match!(Newline(_,_)))
                     .enumerate()
                     .map(|(i, token)| Ok((i, token, i+1)))
                     .collect();
@@ -194,6 +194,91 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageImports> {
     }
 }
 
+// Detects the significant indentation markers in a list of
+// tokens, filter out the meaningless ones.
+fn filter_indent(tokens : Vec<ElmToken>) -> Vec<ElmToken> {
+    #[derive(PartialEq, Debug, Copy, Clone)] enum IndentSource { Let, Of }
+    let mut indent_stack : Vec<(IndentSource,i16)> = Vec::new();
+    let mut ret : Vec<ElmToken> = Vec::new();
+    let mut indenter : Option<IndentSource> = None;
+
+    // Finds the corresponding indent in vec. If there is no corresponding
+    // indent, returns None.
+    // There is no corresponding indent if:
+    // - No matching indent level exists in vec, such as all succeeding
+    //   `IndentSource` are `IndentSource::Of`.
+    fn identify_ident(
+        stack_index : usize,
+        to_find : i16,
+        vec : &mut Vec<(IndentSource,i16)>
+        ) -> Option<usize>
+    {
+        let (src, indent) = vec[stack_index];
+        if indent == to_find {
+            Some(stack_index)
+        } else if stack_index == 0 {
+            None
+        } else if src == IndentSource::Of {
+            identify_ident(stack_index - 1, to_find, vec)
+        } else {
+            None
+        }
+    }
+    for token in tokens {
+        match token {
+            // TODO: keep track of location after the `let` keyword if
+            // the next Token doesn't start at a new line
+            ElmToken::Let => {
+                ret.push(ElmToken::Let);
+                indenter = Some(IndentSource::Let);
+            },
+            ElmToken::In => {
+                ret.push(ElmToken::In);
+                // We didn't start a newline after `let` keyword
+                // OTHERWISE
+                // Remove all indents up to the corresponding `let`
+                // keyword.
+                if indenter == Some(IndentSource::Let) {
+                    indenter = None
+                } else { while
+                    match indent_stack.pop() {
+                        Some((IndentSource::Let,_)) => false,
+                        _ => true,
+                    }{
+                }}
+            },
+            ElmToken::Newline(line,column) => {
+                match indenter {
+                    Some(source) => {
+                        indent_stack.push((source,column));
+                        ret.push(Newline(line, column));
+                        indenter = None;
+                    },
+                    None if !indent_stack.is_empty() => {
+                        identify_ident(
+                            indent_stack.len()-1,
+                            column,
+                            &mut indent_stack
+                        ).map(|idx| {
+                            indent_stack.truncate(idx+1);
+                            ret.push(Newline(line, column));
+                        });
+                    },
+                    None => {},
+                }
+            },
+            ElmToken::Of => {
+                ret.push(ElmToken::Of);
+                indenter = Some(IndentSource::Of);
+            },
+            any_other => {
+                ret.push(any_other);
+            },
+        }
+    }
+    ret
+}
+
 impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageTopDeclrs> {
     fn next_step(mut self) -> StreamParser<I,StageEof> {
         // TODO: this is flawed because it doesn't capture lazily the
@@ -203,14 +288,18 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageTopDeclrs> {
         loop {
             match self.input.peek() {
                 Some(&Name(_)) | Some(&LParens) | Some(&Port) => {
-                    let unparsed_tokens : Vec<SpanToken> =
+                    let unparsed_tokens : Vec<ElmToken> =
                         self.input
                             .by_ref()
                             .take_while(not_match!(ElmToken::Newline(_,0)))
+                            .collect();
+                    let preparsed_tokens =
+                        filter_indent(unparsed_tokens)
+                            .into_iter()
                             .enumerate()
                             .map(|(i, token)| Ok((i, token, i+1)))
                             .collect();
-                    top_levels.push(Left(unparsed_tokens));
+                    top_levels.push(Left(preparsed_tokens));
                 },
                 Some(_) => {
                     let toplevel_stream : Vec<SpanToken> =

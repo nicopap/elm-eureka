@@ -41,11 +41,16 @@ of tokens that must be ignored).
 "scan" the token stream, keeping in memory a stack of identation level we
 need to look for:
 
-* before `let` add, indent
-
 * first pattern expression after an `of` keyword, add indent
 
+* if there is anything following a `let`, add to the stack
+  the column location of the beginning of that expression
+  (currently it is impossible)
+
 * first declaration after a `let`, add indent
+
+* When encountering a `in`, pop all indents in the stack
+  untill the corresponding `let` (the last one)
 
 * when adding an indent that is lower than the current top of the stack,
   pop all indents greater that the new one

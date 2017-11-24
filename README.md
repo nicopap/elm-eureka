@@ -49,3 +49,29 @@ parse any expression.
 	can imagine a completion manager with caching, or a dependency graph
 	generator etc.
 
+## Limitations
+
+* Aligned indentation after `let` keyword **do not work**. If you are thourugh
+	about using elm-format, this shouldn't be an issue.
+	\
+	example:
+	\
+	```elm
+	-- Do not work
+	f x = let y = x * 3
+	          z = x + 92
+				in x + y + z
+	-- Works, elm-format approved.
+	f x =
+	  let
+		  y = x * 3
+			z = x + 92
+		in
+		  x + y + z
+	```
+
+* Prefix `-`. The weird semantic behind that are beyond me:
+	* If preceeding without whitespace a word or opening parenthesis, and there
+		is no words preceeding the `-` without whitespace, it is a prefix `-`.
+	* Otherwise it is the `-` operator.
+	* You can't imagine how much of an hassle this is to parse.
