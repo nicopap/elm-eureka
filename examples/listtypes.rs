@@ -44,7 +44,7 @@ impl Descriptible for Record {
                 Some(ref name) => format!("generic over {} and", name),
                 None => format!(""),
             };
-        format!("a record {} with {}", variable_descr, self.fields.describe())
+        format!("a record {} with ({})", variable_descr, self.fields.describe())
     }
 }
 
@@ -57,16 +57,19 @@ impl Descriptible for Type {
                 format!("a type variable {}", name),
             Type::Application(ref name,ref arguments) =>
                 format!(
-                    "the higher-kinded type {} to which are applied {}",
+                    "the higher-kinded type {} to which are applied ({})",
                     name,
                     arguments.describe()
                 ),
             Type::UnitType => format!("the unit type"),
             Type::EmptyRecord => format!("an empty record"),
-            Type::Function(_,_) => format!("a function"),
+            Type::Function(ref content) => format!(
+                "a function which arguments are ({})",
+                content.describe()
+            ),
             Type::Record(ref record) => record.describe(),
             Type::Tuple(ref contained) =>
-                format!("a tuple containing {}", contained.describe()),
+                format!("a tuple containing ({})", contained.describe()),
         }
     }
 }

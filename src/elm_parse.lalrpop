@@ -77,21 +77,28 @@ pub TopDeclr: TopDeclr = {
 
     "type" "alias" <name:NameTok> <type_variables:NameTok*> "=" <type_:Type> =>
         TopDeclr::TypeAlias(ast::TypeAlias{<>}),
-    // "port" <NameTok> ":" <Type> =>
-    //     {},
-    // <NameTok> ":" <Type> =>
-    //     {},
+    "port" <NameTok> ":" <Type> =>
+        TopDeclr::FunctionTypeDeclr(true, <>),
+    <NameTok> ":" <Type> =>
+        TopDeclr::FunctionTypeDeclr(false, <>),
     // <NameTok> <Pattern*> "=" <Expression> =>
-    //     {},
+    //     TopDeclr::FunctionDeclr(),
 };
 
 Type: ast::Type = {
+    <args:(<FunctionlessType> "->")+> <returns:FunctionlessType> => {
+        let mut function_types = args;
+        function_types.push(returns);
+        ast::Type::Function(function_types)
+    },
+
+    <FunctionlessType> =>
+        <>,
+};
+
+FunctionlessType: ast::Type = {
     <name:NameTok> <arguments:EnclosedType+> =>
         ast::Type::Application(name, arguments),
-
-    //TODO: Either a b -> List c is invalid with this grammar
-    // <EnclosedType> <("->" <Type>)+> =>
-    //     ast::Type::Function(<>),
 
     <EnclosedType> =>
         <>,
@@ -114,26 +121,17 @@ EnclosedType: ast::Type = {
     "(" <Type> ")" =>
         <>,
 
-    "(" <first:Type> <nexts:("," <Type>)+> ")" => {
-        let mut types = nexts;
-        types.insert(0,first);
-        ast::Type::Tuple(types)
+    "(" <firsts:(<Type> ",")+> <last:Type> ")" => {
+        let mut entries = firsts;
+        entries.push(last);
+        ast::Type::Tuple(entries)
     },
 
-    "{" <first_fied:(<NameTok> ":" <Type>)>
-    <next_fields:("," <NameTok> ":" <Type>)*> "}" => {
-        let variable_over = None;
-        let mut fields : Vec<(String, ast::Type)> = next_fields;
-        fields.insert(0, first_fied);
-        ast::Type::Record(ast::Record { variable_over, fields })
-    },
-
-    "{" <variable_over:NameTok> "|"
-    <first_fied:(<NameTok> ":" <Type>)>
-    <next_fields:("," <NameTok> ":" <Type>)*> "}" => {
-        let variable_over = Some(variable_over);
-        let mut fields : Vec<(String, ast::Type)> = next_fields;
-        fields.insert(0, first_fied);
+    "{" <variable_over:(<NameTok> "|")?>
+    <first_fieds:(<NameTok> ":" <Type> ",")*>
+    <last_field:(<NameTok> ":" <Type>)> "}" => {
+        let mut fields = first_fieds;
+        fields.push(last_field);
         ast::Type::Record(ast::Record { variable_over, fields })
     },
 };

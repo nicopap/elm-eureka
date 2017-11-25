@@ -33,13 +33,36 @@ but we need to know when to do so. What I did to handle them is that:
 
 ## Indentation management
 
-In expressions, newline tokens that are not top level matter. When we know
+In expressions, newline tokens helps figure out indentation. When we know
 we are parsing an expression, we need to selectively keep only the newline
 tokens that are meaningfull (so as to not bloat the grammar with a bunch
 of tokens that must be ignored).
 
+Here is how to do it:
+
 "scan" the token stream, keeping in memory a stack of identation level we
 need to look for:
+
+An expression of type:
+
+```elm
+case expr_5 of
+  Http.BadUrl ptrn_3 ->
+    expr_6
+
+  Http.Timeout ->
+    expr_7
+
+  Http.NetworkError ->
+    expr_8
+```
+
+will be translated in token form:
+
+```
+"case" /Expr/ "of" /Name/ /Ptn/ "->" /Expr/ "INDENT" /Name/ "->" /Expr/
+"INDENT" /Name/ "->" /Expr/ "ENDOF"
+```
 
 * first pattern expression after an `of` keyword, add indent
 
@@ -110,8 +133,10 @@ Ny //Newline with specific indent
  ( Operator ) </Pattern/>* = /Expression/ N0
 
 /Type/ :=
+ </FunctionlessType/ ->>* /FunctionlessType/
+
+/FunctionlessType/ :=
  Name </EnclosedType/>+
- /Type/ <-> /Type/>+
  /EnclosedType/
 
 /EnclosedType/ :=

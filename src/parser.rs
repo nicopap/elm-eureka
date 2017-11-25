@@ -207,10 +207,13 @@ fn filter_indent(tokens : Vec<ElmToken>) -> Vec<ElmToken> {
     // There is no corresponding indent if:
     // - No matching indent level exists in vec, such as all succeeding
     //   `IndentSource` are `IndentSource::Of`.
+    //
+    // # Panics
+    // if called with a `stack_index` out of range of `vec`
     fn identify_ident(
         stack_index : usize,
         to_find : i16,
-        vec : &mut Vec<(IndentSource,i16)>
+        vec : &Vec<(IndentSource,i16)>
         ) -> Option<usize>
     {
         let (src, indent) = vec[stack_index];
@@ -235,33 +238,33 @@ fn filter_indent(tokens : Vec<ElmToken>) -> Vec<ElmToken> {
             ElmToken::In => {
                 ret.push(ElmToken::In);
                 // We didn't start a newline after `let` keyword
-                // OTHERWISE
-                // Remove all indents up to the corresponding `let`
-                // keyword.
                 if indenter == Some(IndentSource::Let) {
                     indenter = None
-                } else { while
-                    match indent_stack.pop() {
-                        Some((IndentSource::Let,_)) => false,
-                        _ => true,
-                    }{
-                }}
+                } else {
+                    // Remove all indents up to the corresponding `let`
+                    loop {
+                        match indent_stack.pop() {
+                            Some((IndentSource::Let, _)) => break,
+                            Some((IndentSource::Of, _)) => {},
+                            None => break,
+                        }
+                    }
+                }
             },
-            ElmToken::Newline(line,column) => {
+            ElmToken::Newline(_,column) => {
                 match indenter {
                     Some(source) => {
                         indent_stack.push((source,column));
-                        ret.push(Newline(line, column));
                         indenter = None;
                     },
                     None if !indent_stack.is_empty() => {
                         identify_ident(
                             indent_stack.len()-1,
                             column,
-                            &mut indent_stack
+                            &indent_stack
                         ).map(|idx| {
                             indent_stack.truncate(idx+1);
-                            ret.push(Newline(line, column));
+                            ret.push(ElmToken::Indent);
                         });
                     },
                     None => {},

@@ -112,6 +112,8 @@ pub enum ElmToken {
     /// elm has `\0999999` (decimal escape) and `\xfffff` (hex escape)
     /// but also, one can escape some single-characters.
     Char(String),
+    /// A significant indent
+    Indent,
 }
 
 impl fmt::Display for ElmToken {
@@ -156,6 +158,7 @@ impl fmt::Display for ElmToken {
             StringLit(ref content) => write!(f, "\"{}\"", content),
             Number(ref content) => write!(f, "{}", content),
             Char(ref content) => write!(f, "'{}'", content),
+            Indent => write!(f,""),
         }
     }
 }
@@ -202,6 +205,7 @@ impl fmt::Debug for ElmToken {
             StringLit(_) => write!(f, "\"..\""),
             Number(ref content) => write!(f, "#{}#", content),
             Char(ref content) => write!(f, "'{}'", content),
+            Indent => write!(f, "<INDENT>"),
         }
     }
 }

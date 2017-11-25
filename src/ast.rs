@@ -48,7 +48,7 @@ pub enum TopDeclr {
     DocString(String),
     TypeDeclr(TypeDeclr),
     TypeAlias(TypeAlias),
-    // FunctionTypeDeclr(bool, Name, Type),
+    FunctionTypeDeclr(bool, Name, Type),
     // FunctionDeclr(FunctionDeclr),
 }
 
@@ -86,7 +86,9 @@ pub enum Type {
     /// A record, can have typed fields, can be an anonymous extensible
     /// record `{ a | fields : Blah }`
     Record(Record),
-    Function(Box<Type>, Vec<Type>),
+    /// A function with arity 1 or more (in fact, with curry everything is of
+    /// arity 1 or 0, but who cares (hint: not me))
+    Function(Vec<Type>),
     /// A type application, such as `Task (List String) (a, b -> c)`
     /// (when the kind of a type is 1 or more, it needs an "argument"
     /// to become an actual meaningfull type)
