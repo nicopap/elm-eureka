@@ -49,7 +49,9 @@ pub enum TopDeclr {
     TypeDeclr(TypeDeclr),
     TypeAlias(TypeAlias),
     FunctionTypeDeclr(bool, Name, Type),
-    // FunctionDeclr(FunctionDeclr),
+    OperatorTypeDeclr(Name, Type),
+    FunctionDeclr(Name, Vec<Pattern>),
+    OperatorDeclr(Name, Vec<Pattern>),
 }
 
 #[derive(Debug,Clone)]
@@ -104,6 +106,25 @@ pub struct Record {
     pub variable_over : Option<Name>,
     pub fields : Vec<(Name, Type)>,
 }
+
+#[derive(Debug,Clone)]
+pub enum Pattern {
+    ArgConstructor(Name, Vec<Pattern>),
+    Record(Vec<Name>),
+    AliasBind(Name, Box<Pattern>),
+    Tuple(Vec<Pattern>),
+    UnitType,
+    Constructor(Name),
+    Bind(Name),
+    StringLit(String),
+    Character(String),
+    Number(String),
+    Discard,
+    EmptyList,
+    List(Vec<Pattern>),
+    Decons(Vec<Pattern>),
+}
+
 
 pub struct LazilyParsed<I,T>(Either<I,Option<T>>)
     where I: IntoIterator<Item=ElmToken>;

@@ -28,7 +28,7 @@ ExportList: ast::ExportList = {
 };
 
 ExportEntry: ast::ExportEntry = {
-    <NameTok> =>
+    NameTok =>
         ast::ExportEntry::Name(<>),
 
     "(" <OperatorTok> ")" =>
@@ -64,7 +64,7 @@ pub TopDeclr: TopDeclr = {
             operator : operator,
         }),
 
-    <DocCommentTok> =>
+    DocCommentTok =>
         TopDeclr::DocString(<>),
 
     "type" <name:NameTok> <type_variables:NameTok*> "="
@@ -81,8 +81,53 @@ pub TopDeclr: TopDeclr = {
         TopDeclr::FunctionTypeDeclr(true, <>),
     <NameTok> ":" <Type> =>
         TopDeclr::FunctionTypeDeclr(false, <>),
-    // <NameTok> <Pattern*> "=" <Expression> =>
-    //     TopDeclr::FunctionDeclr(),
+    "(" <OperatorTok> ")" ":" <Type> =>
+        TopDeclr::OperatorTypeDeclr(<>),
+    <name:NameTok> <args:EnclosedPattern*> "=" (TokenList)* =>
+        TopDeclr::FunctionDeclr(name, args),
+    "(" <op:OperatorTok> ")" <args:EnclosedPattern*> "=" (TokenList)* =>
+        TopDeclr::OperatorDeclr(op, args),
+};
+
+TokenList: tokens::ElmToken = {
+    "(" => <>,
+    ")" => <>,
+    "," => <>,
+    OperatorTok => tokens::ElmToken::Operator(<>),
+    ".." => <>,
+    NameTok => tokens::ElmToken::Name(<>),
+    "module" => <>,
+    "exposing" => <>,
+    "import" => <>,
+    "as" => <>,
+    "{" => <>,
+    "}" => <>,
+    DocCommentTok => tokens::ElmToken::DocComment(<>),
+    "[" => <>,
+    "]" => <>,
+    "lambda" => <>,
+    "->" => <>,
+    "case" => <>,
+    "of" => <>,
+    "_" => <>,
+    "if" => <>,
+    "then" => <>,
+    "else" => <>,
+    "|" => <>,
+    "=" => <>,
+    ":" => <>,
+    "type" => <>,
+    "alias" => <>,
+    "infixr" => <>,
+    "infixl" => <>,
+    "port" => <>,
+    "where" => <>,
+    "let" => <>,
+    "in" => <>,
+    StringTok => tokens::ElmToken::StringLit(<>),
+    NumberTok => tokens::ElmToken::Number(<>),
+    CharTok => tokens::ElmToken::Char(<>),
+    "\t" => <>,
 };
 
 Type: ast::Type = {
@@ -92,7 +137,7 @@ Type: ast::Type = {
         ast::Type::Function(function_types)
     },
 
-    <FunctionlessType> =>
+    FunctionlessType =>
         <>,
 };
 
@@ -105,12 +150,6 @@ FunctionlessType: ast::Type = {
 };
 
 EnclosedType: ast::Type = {
-    "{" "}" =>
-        ast::Type::EmptyRecord,
-
-    "(" ")" =>
-        ast::Type::UnitType,
-
     <name:NameTok> =>
         if name.chars().nth(0).map(|x| x.is_lowercase()) == Some(true) {
             ast::Type::Variable(name)
@@ -118,32 +157,77 @@ EnclosedType: ast::Type = {
             ast::Type::Terminal(name)
         },
 
-    "(" <Type> ")" =>
-        <>,
-
-    "(" <firsts:(<Type> ",")+> <last:Type> ")" => {
-        let mut entries = firsts;
+    "(" <entries:(<Type> ",")+> <last:Type> ")" => {
+        let mut entries = entries;
         entries.push(last);
         ast::Type::Tuple(entries)
     },
 
     "{" <variable_over:(<NameTok> "|")?>
-    <first_fieds:(<NameTok> ":" <Type> ",")*>
-    <last_field:(<NameTok> ":" <Type>)> "}" => {
-        let mut fields = first_fieds;
-        fields.push(last_field);
+    <fields:Comma<(<NameTok> ":" <Type>)>> "}" => {
         ast::Type::Record(ast::Record { variable_over, fields })
     },
+
+    "{" "}" => ast::Type::EmptyRecord,
+    "(" ")" => ast::Type::UnitType,
+    "(" <Type> ")" => <>,
+};
+
+Pattern: ast::Pattern = {
+    <name:NameTok> <arguments:EnclosedPattern+> => {
+        if name.chars().nth(0).map(|x| x.is_uppercase()) == Some(true) {
+            ast::Pattern::ArgConstructor(name, arguments)
+        } else {
+            panic!("A bind located at the place of constructor")
+        }
+    },
+
+    <EnclosedPattern> =>
+        <>,
+};
+
+EnclosedPattern: ast::Pattern = {
+    "{" <Comma<NameTok>> "}" => // TODO: bind only to lowercase
+        ast::Pattern::Record(<>),
+
+    "(" <p:Pattern> "as" <name:NameTok> ")" =>
+        ast::Pattern::AliasBind(name, Box::new(p)),
+
+    "(" <entries:(<Pattern> ",")+> <last:Pattern> ")" => {
+        let mut entries = entries;
+        entries.push(last);
+        ast::Pattern::Tuple(entries)
+    },
+
+    <name:NameTok> =>
+        if name.chars().nth(0).map(|x| x.is_lowercase()) == Some(true) {
+            ast::Pattern::Bind(name)
+        } else {
+            ast::Pattern::Constructor(name)
+        },
+
+    "(" <entries:(<Pattern> OperatorTok)+> <last:Pattern> ")" => {
+        let mut entries = entries;
+        entries.push(last);
+        ast::Pattern::Decons(entries)
+    },
+
+    "(" <Pattern> ")" => <>,
+    "(" ")" => ast::Pattern::UnitType,
+    StringTok => ast::Pattern::StringLit(<>),
+    NumberTok => ast::Pattern::Number(<>),
+    CharTok => ast::Pattern::Character(<>),
+    "_" => ast::Pattern::Discard,
+    "[" "]" => ast::Pattern::EmptyList,
+    "[" <Comma<Pattern>> "]" => ast::Pattern::List(<>),
+
 };
 
 Comma<T>: Vec<T> = {
-    <v:(<T> ",")*> <e:T?> => match e {
-        None => v,
-        Some(e) => {
-            let mut v = v;
-            v.push(e);
-            v
-        }
+    <v:(<T> ",")*> <e:T> => {
+        let mut v = v;
+        v.push(e);
+        v
     }
 };
 
@@ -190,6 +274,7 @@ extern {
         StringTok => tokens::ElmToken::StringLit(<String>),
         NumberTok => tokens::ElmToken::Number(<String>),
         CharTok => tokens::ElmToken::Char(<String>),
+        "\t" => tokens::ElmToken::Indent,
     }
 }
 

@@ -296,13 +296,17 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageTopDeclrs> {
                             .by_ref()
                             .take_while(not_match!(ElmToken::Newline(_,0)))
                             .collect();
-                    let preparsed_tokens =
+                    let preparsed_tokens : Vec<SpanToken> =
                         filter_indent(unparsed_tokens)
                             .into_iter()
                             .enumerate()
                             .map(|(i, token)| Ok((i, token, i+1)))
                             .collect();
-                    top_levels.push(Left(preparsed_tokens));
+                    let parsed_top_level = Right(
+                        parse_TopDeclr(preparsed_tokens)
+                            .expect("Function Parsing Error")
+                    );
+                    top_levels.push(parsed_top_level);
                 },
                 Some(_) => {
                     let toplevel_stream : Vec<SpanToken> =

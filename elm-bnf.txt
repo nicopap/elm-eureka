@@ -94,8 +94,8 @@ Operator
 StringLit
 Number
 Character
-( , ) { } [ ] -> | = : .. _
-port module where exposing import
+( , ) { } [ ] -> | = : .. _ ::
+port module where exposing import as
 type alias case of if then else let in
 N0 //Newline, with first character at column 0
 Ny //Newline with specific indent
@@ -147,3 +147,21 @@ Ny //Newline with specific indent
  ( )
  Name
 
+/Pattern/ :=
+ Name </EnclosedPattern/>+
+ /EnclosedPattern/
+
+/EnclosedPattern/ :=
+ { Name <, Name>* }
+ ( /Pattern/ as Name )
+ ( /Pattern/ <, /Pattern/>+ )
+ ( /Pattern/ )
+ ( )
+ Name
+ StringLit
+ Number
+ Character
+ _
+ [ ]
+ [ /Pattern/ <, /Pattern/>* ]
+ ( /Pattern/ <:: /Pattern/>+ )
