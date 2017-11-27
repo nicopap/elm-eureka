@@ -107,13 +107,16 @@ pub enum ElmToken {
     /// A character literal.
     ///
     /// Note: the lexer uses the same code for String literals
-    /// and character literals, with ' and " swapped. I couldn't
-    /// find a refer
+    /// and character literals, with ' and " swapped.
     /// elm has `\0999999` (decimal escape) and `\xfffff` (hex escape)
     /// but also, one can escape some single-characters.
     Char(String),
-    /// A significant indent
-    Indent,
+    /// A significant indent in a let expression
+    LetIndent,
+    /// A significant indent in a case expression
+    CaseIndent,
+    /// Terminates a "case" expression when they are directly nested
+    Endcase,
 }
 
 impl fmt::Display for ElmToken {
@@ -158,7 +161,9 @@ impl fmt::Display for ElmToken {
             StringLit(ref content) => write!(f, "\"{}\"", content),
             Number(ref content) => write!(f, "{}", content),
             Char(ref content) => write!(f, "'{}'", content),
-            Indent => write!(f,""),
+            LetIndent => write!(f,""),
+            CaseIndent => write!(f,""),
+            Endcase => write!(f,""),
         }
     }
 }
@@ -205,7 +210,9 @@ impl fmt::Debug for ElmToken {
             StringLit(_) => write!(f, "\"..\""),
             Number(ref content) => write!(f, "#{}#", content),
             Char(ref content) => write!(f, "'{}'", content),
-            Indent => write!(f, "<INDENT>"),
+            LetIndent => write!(f, "<LET INDENT>"),
+            CaseIndent => write!(f, "<CASE INDENT>"),
+            Endcase => write!(f,"<ESAC>"),
         }
     }
 }

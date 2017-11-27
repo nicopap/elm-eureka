@@ -31,55 +31,6 @@ but we need to know when to do so. What I did to handle them is that:
 * When we know the given toplevel declaration contains an expression, keep
   the newline tokens when feeding them to the parser.
 
-## Indentation management
-
-In expressions, newline tokens helps figure out indentation. When we know
-we are parsing an expression, we need to selectively keep only the newline
-tokens that are meaningfull (so as to not bloat the grammar with a bunch
-of tokens that must be ignored).
-
-Here is how to do it:
-
-"scan" the token stream, keeping in memory a stack of identation level we
-need to look for:
-
-An expression of type:
-
-```elm
-case expr_5 of
-  Http.BadUrl ptrn_3 ->
-    expr_6
-
-  Http.Timeout ->
-    expr_7
-
-  Http.NetworkError ->
-    expr_8
-```
-
-will be translated in token form:
-
-```
-"case" /Expr/ "of" /Name/ /Ptn/ "->" /Expr/ "INDENT" /Name/ "->" /Expr/
-"INDENT" /Name/ "->" /Expr/ "ENDOF"
-```
-
-* first pattern expression after an `of` keyword, add indent
-
-* if there is anything following a `let`, add to the stack
-  the column location of the beginning of that expression
-  (currently it is impossible)
-
-* first declaration after a `let`, add indent
-
-* When encountering a `in`, pop all indents in the stack
-  untill the corresponding `let` (the last one)
-
-* when adding an indent that is lower than the current top of the stack,
-  pop all indents greater that the new one
-
-* eliminate all non-significant indents.
-
 ## Lazy parsing
 
 To avoid needless computation (parsing expressions or type declaration), I
@@ -89,16 +40,19 @@ in a data structure so I can parse them later if needed.
 # Terminal symbols
 
 DocString
-Name // a bare token, such as a variable or type names can have prefix
+Name -- a bare token, such as a variable or type names can have prefix
 Operator
 StringLit
+ShaderLit
 Number
 Character
 ( , ) { } [ ] -> | = : .. _ ::
 port module where exposing import as
 type alias case of if then else let in
-N0 //Newline, with first character at column 0
-Ny //Newline with specific indent
+N0 -- Newline, with first character at column 0
+CASE_INDENT -- Indentation aligning case pattern branches
+LET_INDENT -- Indentation aligning let declarations
+ENDCASE -- Implicit closing field of a case pattern branch list.
 
 # Nonterminal symbols
 
@@ -128,9 +82,9 @@ Ny //Newline with specific indent
  type Name <Name>* = Name </EnclosedType/>* <| Name </EnclosedType/>*>* N0
  port Name : /Type/ N0
  Name : /Type/ N0
- Name </Pattern/>* = /Expression/ N0
+ Name </EnclosedPattern/>* = /Expression/ N0
  ( Operator ) : /Type/ N0
- ( Operator ) </Pattern/>* = /Expression/ N0
+ ( Operator ) </EnclosedPattern/>* = /Expression/ N0
 
 /Type/ :=
  </FunctionlessType/ ->>* /FunctionlessType/
@@ -150,6 +104,7 @@ Ny //Newline with specific indent
 /Pattern/ :=
  Name </EnclosedPattern/>+
  /EnclosedPattern/
+ </EnclosedPattern/ ::>+ /EnclosedPattern/
 
 /EnclosedPattern/ :=
  { Name <, Name>* }
@@ -164,4 +119,74 @@ Ny //Newline with specific indent
  _
  [ ]
  [ /Pattern/ <, /Pattern/>* ]
- ( /Pattern/ <:: /Pattern/>+ )
+
+
+/Expression/ :=
+ </ApplicationExpression/ Operator>+ /OpenExpression/
+ /OpenExpression/
+
+
+-- /Expression/ but with terminated case expressions.
+
+/EsacExpression/ :=
+ </ApplicationExpression/ Operator>+ /EsacOpenExpression/
+ /EsacOpenExpression/
+
+/EsacOpenExpression/ :=
+ case /Expression/ of /Casebranche/ <CASE_INDENT /Casebranche/>* ENDCASE
+ \ </EnclosedPattern/>+ -> /EsacExpression/
+ if /Expression/ then /Expression/ else /EsacExpression/
+ let /Declr/ <LET_INDENT /Declr/>* in /EsacExpression/
+ /ApplicationExpr/
+
+/OpenExpression/ :=
+ case /Expression/ of /Casebranche/ <CASE_INDENT /Casebranche/>*
+ \ </EnclosedPattern/>+ -> /Expression/
+ if /Expression/ then /Expression/ else /Expression/
+ let /Declr/ <LET_INDENT /Declr/>* in /Expression/
+ /ApplicationExpr/
+
+/ApplicationExpression/ :=
+ </ClosedExpression/>+
+
+/ClosedExpression/ :=
+ { <Name |>? Name = /Expression/ <, Name = /Expression/>* }
+ { }
+ [ ]
+ [ /Expression/ <, /Expression/>* ]
+ ( /Expression/ <, /Expression/>+ )
+ ( /Expression/ )
+ StringLit
+ Number
+ Character
+ ShaderLit
+ ( )
+ ( <,>+ )
+ ( Operator )
+ Name
+
+
+/Declr/ :=
+ <Name : /Type/ LET_INDENT>? Name </EnclosedPattern/>+ = /Expression/
+ /EnclosedPattern/ = /Expression/
+
+/Casebranche/ :=
+ /Pattern/ -> /EsacExpression/
+
+
+# Apendix: Funny elm expressions
+
+```elm
+x = case let y = () in y of () -> "hello world"
+f (_ as x) = x -- f 10 -> 10
+x = if if 0 == 0 then 1 == 1 else 1 /= 1 then 100 else 3
+y = 10 {- hello -}  -- good
+y = 10 {-| hello |-} -- bad
+\v -> v * x |> List.map --> \v -> List.map (v * x)
+List.map <| \v -> v * x --> List.map (\v -> v * x)
+if x > 0 then \v -> v * 10 else \v -> v / 10 -- good
+
+let    y = 10
+       x = 30
+  in x + y
+```

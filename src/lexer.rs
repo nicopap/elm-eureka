@@ -40,7 +40,7 @@ macro_rules! to_str {
     ( $char_ident:ident ) => ( format!("{}", $char_ident) )
 }
 
-///Just returns the first character of a string
+/// Just returns the first character of a string
 fn first_char(slice : &str) -> char {
     slice.chars().nth(0).unwrap()
 }
@@ -55,12 +55,12 @@ fn is_operator(symbol : char) -> bool {
     }
 }
 
-///Tokenify a string to one single token.
-///Be sure `text_token` is a valid token without padding whitespaces!
-///Also, certain delimiters are not checked for.
-///String and character literals are NOT handled, (it will panic)
-fn into_token(text_token : &str) -> ElmToken {
-    match text_token {
+/// Tokenify a string to one single token.
+/// Be sure `text_token` is a valid token without padding whitespaces!
+/// Also, certain delimiters are not checked for.
+/// String and character literals are NOT handled, (it will panic)
+fn into_token(text_token : String) -> ElmToken {
+    match text_token.as_ref() {
         "module" => ElmToken::Module,
         "exposing" => ElmToken::Exposing,
         "import" => ElmToken::Import,
@@ -302,15 +302,6 @@ fn consume_newline<I>(input: &mut Peekable<I>, line: i16)
 /// You could collect into a vector all the tokens
 /// before processing, or you could defer up to the
 /// last moment the evaluation of tokens.
-///
-/// # Current Limitations
-///
-/// The line location is not well kept track of,
-/// so any Newline token will have its line value
-/// set at `1`.
-///
-/// Strings finishing by a `\"` seems to be
-/// erroneously lexed.
 pub struct Lexer<Stream: Iterator<Item=char>> {
     input : Peekable<Stream>,
     line_loc : i16,
@@ -366,7 +357,7 @@ impl <Stream: Iterator<Item=char>> Iterator for Lexer<Stream> {
                         match consume_block_comment(input) {
                             (Some(doc), nl_consumed) => {
                                 self.line_loc += nl_consumed;
-                                return Some(into_token(doc.as_ref()));
+                                return Some(into_token(doc));
                             },
                             (None, nl_consumed) => {
                                 self.line_loc += nl_consumed;
@@ -377,6 +368,17 @@ impl <Stream: Iterator<Item=char>> Iterator for Lexer<Stream> {
                         return Some(ElmToken::LBrace);
                     };
                 },
+                '.' => {
+                    if input.peek().map_or(false, |&c| is_operator(c)) {
+                        let mut into_buffer = String::from(".");
+                        consume_operator(input, &mut into_buffer);
+                        return Some(into_token(into_buffer));
+                    } else if input.peek().map_or(false, |&c| c.is_alphabetic()) {
+                        let mut into_buffer = String::from(".");
+                        consume_name(input, &mut into_buffer);
+                        return Some(ElmToken::Name(into_buffer));
+                    }
+                },
                 c if is_operator(c) => {
                     if c == '-' && input.peek().map_or(false, |&c| c == '-') {
                         consume_line_comment(input);
@@ -384,12 +386,12 @@ impl <Stream: Iterator<Item=char>> Iterator for Lexer<Stream> {
                     }
                     let mut into_buffer : String = to_str!(c);
                     consume_operator(input, &mut into_buffer);
-                    return Some(into_token(into_buffer.as_ref()));
+                    return Some(into_token(into_buffer));
                 },
                 c if c.is_alphabetic() => {
                     let mut into_buffer : String = to_str!(c);
                     consume_name(input, &mut into_buffer);
-                    return Some(into_token(into_buffer.as_ref()));
+                    return Some(into_token(into_buffer));
                 },
                 '_' => { return Some(ElmToken::Underscore) },
                 '"' => {
@@ -406,7 +408,7 @@ impl <Stream: Iterator<Item=char>> Iterator for Lexer<Stream> {
                 c @ '0' ... '9' => {
                     let mut into_buffer : String = to_str!(c);
                     consume_number(input, &mut into_buffer);
-                    return Some(into_token(into_buffer.as_ref()));
+                    return Some(into_token(into_buffer));
                 },
                 c => { println!("######{}#####", c); return None },
             }
@@ -424,7 +426,7 @@ impl <Stream: Iterator<Item=char>> Iterator for Lexer<Stream> {
         )
     }
     const UNORDERED_LIST_EXAMPLE : &str = r#"import Html exposing (li, text, ul)
-import Html.Attributes exposing (class)
+import Html.Attributes exposing (class, Stuff(..))
 
 
 {-| This {- Hello :)-}
@@ -433,9 +435,9 @@ Et maintenant le voyage au supermarché!
 -}
 main =
   ul [class "grocery-list"]
-    [ li [] [text "Pamplemousse"]
-    , li [] [text "Ananas"]
-    , li [] [text "Jus d'orange"]
+    [ li [] [.model >> text "Pamplemousse"]
+    , li [] [Name.Wow << text "Ananas"]
+    , li [] [text 103 "Jus d'orange"]
     , li [] [text "Bœuf"]
     , li [] [text "Soupe du jour"]
     , li [] [text "Camembert"]
@@ -458,18 +460,21 @@ main =
             token_vec, vec![Import, s!(Name,"Html"), Exposing, LParens,
             s!(Name,"li"), Comma, s!(Name,"text"), Comma, s!(Name,"ul"),
             RParens, Newline(2, 0), Import, s!(Name,"Html.Attributes"),
-            Exposing, LParens, s!(Name,"class"), RParens, Newline(5,0),
+            Exposing, LParens, s!(Name,"class"), Comma, s!(Name, "Stuff"),
+            LParens, Ellision, RParens, RParens, Newline(5,0),
             DocComment(String::from(r#" This {- Hello :)-}
 
 Et maintenant le voyage au supermarché!
 "#)), Newline(9,0), s!(Name,"main"), Assign,
             Newline(10,2), s!(Name,"ul"), LBracket, s!(Name,"class"), s!(StringLit,"grocery-list"), RBracket,
             Newline(11,4),LBracket,s!(Name,"li"),LBracket, RBracket,
-            LBracket, s!(Name,"text"), s!(StringLit,"Pamplemousse"), RBracket,
+            LBracket, s!(Name, ".model"), s!(Operator, ">>"),
+            s!(Name,"text"), s!(StringLit,"Pamplemousse"), RBracket,
             Newline(12,4), Comma, s!(Name,"li"), LBracket, RBracket,
-            LBracket, s!(Name,"text"), s!(StringLit,"Ananas"), RBracket,
+            LBracket, s!(Name, "Name.Wow"), s!(Operator, "<<"),
+            s!(Name,"text"), s!(StringLit,"Ananas"), RBracket,
             Newline(13,4), Comma, s!(Name,"li"), LBracket, RBracket,
-            LBracket, s!(Name,"text"), s!(StringLit,"Jus d'orange"), RBracket,
+            LBracket, s!(Name,"text"), s!(Number, "103"), s!(StringLit,"Jus d'orange"), RBracket,
             Newline(14,4), Comma, s!(Name,"li"), LBracket, RBracket,
             LBracket, s!(Name,"text"), s!(StringLit,"Bœuf"), RBracket,
             Newline(15,4), Comma, s!(Name,"li"), LBracket, RBracket,
@@ -508,7 +513,18 @@ Et maintenant le voyage au supermarché!
     }
     #[test] fn test_consume_name() {
         consumer_test!( "Some.test-10", "Some.test", "-10", consume_name);
+        consumer_test!( "Some.test-10", "Some.test", "-10", consume_name);
+        consumer_test!( "Some.Test.hello", "Some.Test.hello","", consume_name);
+        consumer_test!( ".hello", ".hello", "", consume_name);
+        consumer_test!( "model.hello", "model.hello", "", consume_name);
     }
+
+    #[test] fn test_into_token() {
+            let output = into_token(String::from("{-|hello word-}"));
+            assert_eq!(ElmToken::DocComment(String::from("hello word")),
+                       output);
+    }
+
     macro_rules! block_test_boilerplate {
         ($input_value:expr, $buffer_res:expr, $input_remain:expr) => (
             let mut input = $input_value.chars().peekable();

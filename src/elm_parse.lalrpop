@@ -4,6 +4,7 @@ use std::str::FromStr;
 use ast::TopDeclr;
 use either::Either;
 
+// #[recursive_ascent]
 grammar;
 
 pub ModuleDeclr: ast::ModuleDeclr = {
@@ -20,25 +21,15 @@ pub ModuleDeclr: ast::ModuleDeclr = {
 };
 
 ExportList: ast::ExportList = {
-    "(" ".." ")" =>
-        ast::ExportList::Unqualified,
-
-    "(" <export_list:Comma<ExportEntry>> ")" =>
-        ast::ExportList::List(export_list),
+    "(" ".." ")" => ast::ExportList::Unqualified,
+    "(" <Comma<ExportEntry>> ")" => ast::ExportList::List(<>),
 };
 
 ExportEntry: ast::ExportEntry = {
-    NameTok =>
-        ast::ExportEntry::Name(<>),
-
-    "(" <OperatorTok> ")" =>
-        ast::ExportEntry::Operator(<>),
-
-    <NameTok> "(" ".." ")" =>
-        ast::ExportEntry::WithAllConstructors(<>),
-
-    <name:NameTok> "(" <vals:Comma<NameTok>> ")" =>
-        ast::ExportEntry::WithConstructors(name, vals),
+    NameTok => ast::ExportEntry::Name(<>),
+    "(" <OperatorTok> ")" => ast::ExportEntry::Operator(<>),
+    <NameTok> "(" ".." ")" => ast::ExportEntry::WithAllConstructors(<>),
+    <NameTok> "(" <Comma<NameTok>> ")" => ast::ExportEntry::WithConstructors(<>),
 
 };
 
@@ -64,9 +55,6 @@ pub TopDeclr: TopDeclr = {
             operator : operator,
         }),
 
-    DocCommentTok =>
-        TopDeclr::DocString(<>),
-
     "type" <name:NameTok> <type_variables:NameTok*> "="
     <first_alt:(<NameTok> <EnclosedType*>)>
     <next_alts:("|"<NameTok> <EnclosedType*>)*> => {
@@ -77,16 +65,20 @@ pub TopDeclr: TopDeclr = {
 
     "type" "alias" <name:NameTok> <type_variables:NameTok*> "=" <type_:Type> =>
         TopDeclr::TypeAlias(ast::TypeAlias{<>}),
-    "port" <NameTok> ":" <Type> =>
-        TopDeclr::FunctionTypeDeclr(true, <>),
-    <NameTok> ":" <Type> =>
-        TopDeclr::FunctionTypeDeclr(false, <>),
+
+    "(" <OperatorTok> ")" <EnclosedPattern*> "=" <Expression> =>
+        TopDeclr::OperatorDeclr(<>),
+
+    <p:"port"?> <name:NameTok> ":" <type_:Type> =>
+        TopDeclr::FunctionAnnotation(p.is_some(), name,  type_),
+
     "(" <OperatorTok> ")" ":" <Type> =>
-        TopDeclr::OperatorTypeDeclr(<>),
-    <name:NameTok> <args:EnclosedPattern*> "=" (TokenList)* =>
-        TopDeclr::FunctionDeclr(name, args),
-    "(" <op:OperatorTok> ")" <args:EnclosedPattern*> "=" (TokenList)* =>
-        TopDeclr::OperatorDeclr(op, args),
+        TopDeclr::OperatorAnnotation(<>),
+
+    <NameTok> <EnclosedPattern*> "=" <Expression> =>
+        TopDeclr::FunctionDeclr(<>),
+
+    DocCommentTok => TopDeclr::DocString(<>),
 };
 
 TokenList: tokens::ElmToken = {
@@ -127,7 +119,9 @@ TokenList: tokens::ElmToken = {
     StringTok => tokens::ElmToken::StringLit(<>),
     NumberTok => tokens::ElmToken::Number(<>),
     CharTok => tokens::ElmToken::Char(<>),
-    "\t" => <>,
+    "let indent" => <>,
+    "case indent" => <>,
+    "endcase" => <>,
 };
 
 Type: ast::Type = {
@@ -137,16 +131,12 @@ Type: ast::Type = {
         ast::Type::Function(function_types)
     },
 
-    FunctionlessType =>
-        <>,
+    FunctionlessType => <>,
 };
 
 FunctionlessType: ast::Type = {
-    <name:NameTok> <arguments:EnclosedType+> =>
-        ast::Type::Application(name, arguments),
-
-    <EnclosedType> =>
-        <>,
+    NameTok EnclosedType+ => ast::Type::Application(<>),
+    EnclosedType => <>,
 };
 
 EnclosedType: ast::Type = {
@@ -182,8 +172,13 @@ Pattern: ast::Pattern = {
         }
     },
 
-    <EnclosedPattern> =>
-        <>,
+    <entries:(<EnclosedPattern> OperatorTok)+> <last:EnclosedPattern> => {
+        let mut entries = entries;
+        entries.push(last);
+        ast::Pattern::Decons(entries)
+    },
+
+    EnclosedPattern => <>,
 };
 
 EnclosedPattern: ast::Pattern = {
@@ -206,12 +201,6 @@ EnclosedPattern: ast::Pattern = {
             ast::Pattern::Constructor(name)
         },
 
-    "(" <entries:(<Pattern> OperatorTok)+> <last:Pattern> ")" => {
-        let mut entries = entries;
-        entries.push(last);
-        ast::Pattern::Decons(entries)
-    },
-
     "(" <Pattern> ")" => <>,
     "(" ")" => ast::Pattern::UnitType,
     StringTok => ast::Pattern::StringLit(<>),
@@ -221,6 +210,146 @@ EnclosedPattern: ast::Pattern = {
     "[" "]" => ast::Pattern::EmptyList,
     "[" <Comma<Pattern>> "]" => ast::Pattern::List(<>),
 
+};
+
+Expression: ast::Expression = {
+    <prefix:(<ApplicationExpression> <OperatorTok>)+> <last:OpenExpression> =>
+        ast::Expression::InfixApplication(prefix, Box::from(last)),
+
+    OpenExpression => <>,
+};
+
+EsacExpression: ast::Expression = {
+    <prefix:(<ApplicationExpression> <OperatorTok>)+>
+    <last:EsacOpenExpression> =>
+        ast::Expression::InfixApplication(prefix, Box::from(last)),
+
+    EsacOpenExpression => <>,
+};
+
+EsacOpenExpression: ast::Expression = {
+    "case" <expr:Expression> "of"
+    <init:(<Pattern> "->" <EsacExpression> "case indent")*>
+    <last:(<Pattern> "->" <EsacExpression>)> "endcase" => {
+        let mut branches = init;
+        branches.push(last);
+        ast::Expression::CaseOf(Box::from(expr), branches)
+    },
+
+    "lambda" <patterns:EnclosedPattern+> "->" <expr:EsacExpression>  =>
+        ast::Expression::Lambda(patterns, Box::from(expr)),
+
+    "if" <ife:Expression>
+    "then" <thene:Expression>
+    "else" <elsee:EsacExpression> =>
+        ast::Expression::IfThenElse(
+            Box::from(ife),
+            Box::from(thene),
+            Box::from(elsee)
+        ),
+
+    "let" <init:(<LetDeclaration> "let indent")*> <last:LetDeclaration>
+    "in" <in_expr:EsacExpression> => {
+        let mut declarations = init;
+        declarations.push(last);
+        ast::Expression::LetIn(declarations, Box::from(in_expr))
+    },
+
+    ApplicationExpression => <>,
+};
+
+OpenExpression: ast::Expression = {
+    "case" <expr:Expression> "of"
+    <init:(<Pattern> "->" <EsacExpression> "case indent")*>
+    <last:(<Pattern> "->" <EsacExpression>)> => {
+        let mut branches = init;
+        branches.push(last);
+        ast::Expression::CaseOf(Box::from(expr), branches)
+    },
+
+    "lambda" <patterns:EnclosedPattern+> "->" <expr:Expression>  =>
+        ast::Expression::Lambda(patterns, Box::from(expr)),
+
+    "if" <ife:Expression>
+    "then" <thene:Expression>
+    "else" <elsee:Expression> =>
+        ast::Expression::IfThenElse(
+            Box::from(ife),
+            Box::from(thene),
+            Box::from(elsee)
+        ),
+
+    "let" <init:(<LetDeclaration> "let indent")*> <last:LetDeclaration>
+    "in" <in_expr:Expression> => {
+        let mut declarations = init;
+        declarations.push(last);
+        ast::Expression::LetIn(declarations, Box::from(in_expr))
+    },
+
+    ApplicationExpression => <>,
+};
+
+ApplicationExpression: ast::Expression = {
+    <head:ClosedExpression> <tail:ClosedExpression+> => {
+        let mut expressions = tail;
+        expressions.insert(0,head);
+        ast::Expression::Application(expressions)
+    },
+
+    ClosedExpression => <>,
+};
+
+ClosedExpression: ast::Expression = {
+    "{" <(<NameTok> "|")?> <Comma<(<NameTok> "=" <Expression>)>> "}" =>
+        ast::Expression::Record(<>),
+
+    "[" <Comma<Expression>> "]" =>
+        ast::Expression::List(<>),
+
+    "(" <entries:(<Expression> ",")+> <last:Expression> ")" => {
+        let mut entries = entries;
+        entries.push(last);
+        ast::Expression::Tuple(entries)
+    },
+
+    "(" <commas:","+> ")" =>
+        ast::Expression::TupleConstructor((commas.len() + 1) as i16),
+
+    "{" "}" => ast::Expression::EmptyRecord,
+    "[" "]" => ast::Expression::EmptyList,
+    "(" ")" => ast::Expression::UnitType,
+    "(" <Expression> ")" => <>,
+    StringTok => ast::Expression::StringLit(<>),
+    NumberTok => ast::Expression::Number(<>),
+    CharTok => ast::Expression::Character(<>),
+    "(" <OperatorTok> ")" => ast::Expression::PrefixOperator(<>),
+    NameTok => ast::Expression::Variable(<>),
+};
+
+LetDeclaration: Either<ast::LetDeclaration,ast::LetBind> = {
+    <annotation:(<NameTok> ":" <Type> "let indent")?>
+    <name:NameTok> <arguments:EnclosedPattern+> "=" <body:Expression> => {
+        match annotation {
+            Some((annot_name, maybe_annotation)) => {
+                if annot_name != name {
+                    panic!("Type annotation name in let expression doesn't \
+                           match the function declaration it is annotating")
+                }
+                let annotation = Some(maybe_annotation);
+                Either::Left(
+                    ast::LetDeclaration{annotation, name, arguments, body}
+                )
+            },
+            None => {
+                Either::Left(
+                    ast::LetDeclaration{annotation:None, name, arguments, body}
+                )
+            },
+        }
+    },
+
+    <pattern:EnclosedPattern> "=" <body:Expression> =>
+        Either::Right(ast::LetBind{<>}),
 };
 
 Comma<T>: Vec<T> = {
@@ -274,7 +403,9 @@ extern {
         StringTok => tokens::ElmToken::StringLit(<String>),
         NumberTok => tokens::ElmToken::Number(<String>),
         CharTok => tokens::ElmToken::Char(<String>),
-        "\t" => tokens::ElmToken::Indent,
+        "case indent" => tokens::ElmToken::CaseIndent,
+        "let indent" => tokens::ElmToken::LetIndent,
+        "endcase" => tokens::ElmToken::Endcase, // Dying of calling it "esac"
     }
 }
 

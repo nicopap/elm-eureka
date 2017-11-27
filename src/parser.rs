@@ -1,10 +1,11 @@
 //! An efficient implementation of an elm parser
 
 use std::iter::{Peekable,SkipWhile};
+use std::fmt;
 
 use itertools::{Coalesce,Itertools};
 use either::Either;
-use either::Either::{Left,Right};
+use either::Either::Right;
 
 use ast;
 use elm_parse::{parse_ModuleDeclr,parse_Import, parse_TopDeclr};
@@ -106,7 +107,7 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I, StageModuleDeclr> {
         let is_newline : fn(&ElmToken)->bool = is_match!(&Newline(_,_));
         let remove_dup_newlines : CoalSig<ElmToken> = |prev,cur| {
             match (prev,cur) {
-                (Newline(_,0), Newline(x,0)) => Ok(Newline(x,0)),
+                (Newline(_,_), latest@Newline(_,_)) => Ok(latest),
                 (ElmToken::Type, Name(ref content)) if content == "alias" =>
                     Err((ElmToken::Type, ElmToken::Alias)),
                 (prev_, cur_) => Err((prev_, cur_)),
@@ -174,14 +175,13 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageImports> {
     fn next_step(mut self) -> StreamParser<I,StageTopDeclrs> {
         let mut module_imports : Vec<ast::ElmImport> = Vec::new();
         while self.input.peek() == Some(&ElmToken::Import) {
-            let import_stream : Vec<SpanToken> =
+            let import_stream =
                 self.input
                     .by_ref()
                     .take_while(not_match!(Newline(_,0)))
                     .filter(not_match!(Newline(_,_)))
                     .enumerate()
-                    .map(|(i, token)| Ok((i, token, i+1)))
-                    .collect();
+                    .map(|(i, token)| Ok((i, token, i+1)));
             let cur_import = parse_Import(import_stream).expect("Parsing Error");
             module_imports.push(cur_import);
         }
@@ -194,129 +194,233 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageImports> {
     }
 }
 
-// Detects the significant indentation markers in a list of
-// tokens, filter out the meaningless ones.
-fn filter_indent(tokens : Vec<ElmToken>) -> Vec<ElmToken> {
-    #[derive(PartialEq, Debug, Copy, Clone)] enum IndentSource { Let, Of }
-    let mut indent_stack : Vec<(IndentSource,i16)> = Vec::new();
-    let mut ret : Vec<ElmToken> = Vec::new();
-    let mut indenter : Option<IndentSource> = None;
+#[derive(PartialEq, Copy, Clone)] enum IndentEntry {
+    Let(i16),
+    Case(i16),
+    // The delimiters are `let .. in`, `( .. )`, `[ .. ]`, `{ .. }`,
+    // `if .. then .. else`.
+    // Keeping track of them helps telling where to insert the `endcase`
+    // tokens.
+    Delimiter,
+}
 
-    // Finds the corresponding indent in vec. If there is no corresponding
-    // indent, returns None.
-    // There is no corresponding indent if:
-    // - No matching indent level exists in vec, such as all succeeding
-    //   `IndentSource` are `IndentSource::Of`.
-    //
-    // # Panics
-    // if called with a `stack_index` out of range of `vec`
-    fn identify_ident(
-        stack_index : usize,
-        to_find : i16,
-        vec : &Vec<(IndentSource,i16)>
-        ) -> Option<usize>
-    {
-        let (src, indent) = vec[stack_index];
-        if indent == to_find {
-            Some(stack_index)
-        } else if stack_index == 0 {
-            None
-        } else if src == IndentSource::Of {
-            identify_ident(stack_index - 1, to_find, vec)
-        } else {
-            None
+impl fmt::Debug for IndentEntry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            IndentEntry::Let(indent) => write!(f, "l{}", indent),
+            IndentEntry::Case(indent) => write!(f, "c{}", indent),
+            IndentEntry::Delimiter => write!(f, "del"),
         }
     }
-    for token in tokens {
-        match token {
-            // TODO: keep track of location after the `let` keyword if
-            // the next Token doesn't start at a new line
-            ElmToken::Let => {
-                ret.push(ElmToken::Let);
-                indenter = Some(IndentSource::Let);
+}
+#[derive(PartialEq, Debug, Copy, Clone)] enum IndentTrigger {Let, Of}
+
+/// An iterator adaptator that turns Newline tokens into meaningfull
+/// indentation for the parser to consume.
+///
+/// The FilterIndent keeps as internal state the indent stack. The
+/// indent stack keeps track of meaningfull indentations for when
+/// they need to be aligned, and for inserting "endcase" tokens when
+/// necessary (nested `case` expressions). The `indent_stack` not only
+/// keeps track of what "meaningfull" indentation lines to look for, but
+/// also of enclosing delimiters such as `()`, `[]` or `{}`. This is so
+/// we do not insert `endcase` tokens at the wrong place.
+#[derive(Debug)]
+struct FilterIndent<I:Iterator<Item=ElmToken>> {
+    input: I,
+    // Holdy information about the levels of indentation we are in, and
+    // if there is "enclosing" expressions that renders `Of` ending moot.
+    indent_stack: Vec<IndentEntry>,
+    // If a keyword into an expression needing indentation is found, put
+    // it there so at the next newline we know what to do
+    indent_trigger: Option<IndentTrigger>,
+    // A buffer to hold multiple tokens we want to emit later.
+    buffer_stack: Vec<ElmToken>,
+}
+
+impl<I:Iterator<Item=ElmToken>> FilterIndent<I> {
+    // Pop `indent_stack`, closing off unfinished Case expressions by
+    // pushing `Endcase` in `buffer_stack`. `indent_stack` is poped until
+    // given `entry` is found, the corresponding item is poped from the
+    // stack.
+    // We only push `Endcase` when there is two succeeding `Of` sources.
+    // This follows the grammatical rules of only closing `case` expressions
+    // with an `endcase` if the `case` are nested or nested within open
+    // expressions.
+    fn pop_indents_to(&mut self, entry: IndentEntry) {
+        let mut last_indenter_is_case = false;
+        loop { match self.indent_stack.pop() {
+            None => return,
+            Some(IndentEntry::Case(indent_level)) if last_indenter_is_case => {
+                self.buffer_stack.push(ElmToken::Endcase);
+                if IndentEntry::Case(indent_level) == entry { return }
             },
-            ElmToken::In => {
-                ret.push(ElmToken::In);
-                // We didn't start a newline after `let` keyword
-                if indenter == Some(IndentSource::Let) {
-                    indenter = None
-                } else {
-                    // Remove all indents up to the corresponding `let`
-                    loop {
-                        match indent_stack.pop() {
-                            Some((IndentSource::Let, _)) => break,
-                            Some((IndentSource::Of, _)) => {},
-                            None => break,
-                        }
+            Some(IndentEntry::Case(indent_level)) /* otherwise */ => {
+                last_indenter_is_case = true;
+                if IndentEntry::Case(indent_level) == entry { return }
+            },
+            Some(indenter) if indenter == entry => return,
+            Some(_) /* otherwise */ => {
+                last_indenter_is_case = false;
+            },
+        } }
+    }
+
+    // Finds the corresponding indent in `indent_stack`.
+    // pop `indent_stack` and inserts token in `buffer_stack` accordingly
+    //
+    // Ideally this should be inlined in the only place where calling this
+    // function is relevent (in source code)
+    fn locate_indent(&mut self, indent_level: i16) {
+        // This function works in two steps:
+        // 1. detects if an entry in the `indent_stack` has the corresponding
+        //    `indent_level`.
+        // 2. If not, returns.
+        //    otherwise pops `indent_stack` up to the found `indent_level`
+        use self::IndentEntry::{Case,Let};
+        if self.indent_stack.is_empty() { return }
+        let stack_last = self.indent_stack.len() - 1;
+        let mut idx = stack_last;
+        match loop {
+            // I mean seriously, this is bound checked 1000%
+            let current_indenter = self.indent_stack.get(idx).unwrap();
+            match *current_indenter {
+                Case(indent) if indent == indent_level => {
+                    self.buffer_stack.push(ElmToken::CaseIndent);
+                    break Some(idx)
+                },
+                Let(indent) if indent == indent_level => {
+                    self.buffer_stack.push(ElmToken::LetIndent);
+                    break Some(idx)
+                },
+                _ => {},
+            }
+            if idx == 0 { break None }
+            idx -= 1;
+        } { // 2.
+            None => return,
+            Some(indenter_location) => {
+                let pop_count = stack_last - indenter_location;
+                let mut last_indenter_is_case = false;
+                // Pop values over the indentation we found (leaving
+                // the one we found)
+                for _ in 0..pop_count {
+                    match self.indent_stack.pop().unwrap() {
+                        Case(_) if last_indenter_is_case => {
+                            self.buffer_stack.push(ElmToken::Endcase);
+                        },
+                        Case(_) => last_indenter_is_case = true,
+                        _ => last_indenter_is_case = false,
                     }
                 }
-            },
-            ElmToken::Newline(_,column) => {
-                match indenter {
-                    Some(source) => {
-                        indent_stack.push((source,column));
-                        indenter = None;
-                    },
-                    None if !indent_stack.is_empty() => {
-                        identify_ident(
-                            indent_stack.len()-1,
-                            column,
-                            &indent_stack
-                        ).map(|idx| {
-                            indent_stack.truncate(idx+1);
-                            ret.push(ElmToken::Indent);
-                        });
-                    },
-                    None => {},
+                // Cleanup if we popped a case when we are aligned to a case
+                if last_indenter_is_case
+                   && self.indent_stack.last() == Some(&Case(indent_level))
+                {
+                    self.buffer_stack.push(ElmToken::Endcase)
                 }
-            },
-            ElmToken::Of => {
-                ret.push(ElmToken::Of);
-                indenter = Some(IndentSource::Of);
-            },
-            any_other => {
-                ret.push(any_other);
             },
         }
     }
-    ret
 }
+
+impl<I:Iterator<Item=ElmToken>> Iterator for FilterIndent<I> {
+    type Item=ElmToken;
+    // TODO: keep track of location after the `let` keyword if
+    // the next Token doesn't start at a new line
+    fn next(&mut self) -> Option<ElmToken> {
+        use self::ElmToken::*;
+
+        if let Some(token) = self.buffer_stack.pop() { return Some(token) }
+        match self.input.next() {
+        None => return None,
+        Some(token) => match token {
+            LParens | LBrace | LBracket | If => {
+                self.indent_stack.push(IndentEntry::Delimiter);
+                return Some(token);
+            },
+            Let => {
+                self.indent_trigger = Some(IndentTrigger::Let);
+                self.indent_stack.push(IndentEntry::Delimiter);
+                return Some(Let);
+            },
+            Of => {
+                self.indent_trigger = Some(IndentTrigger::Of);
+                return Some(Of);
+            },
+            RParens | RBrace | RBracket | Else => {
+                self.buffer_stack.push(token);
+                self.pop_indents_to(IndentEntry::Delimiter);
+            },
+            In => {
+                self.indent_trigger = None;
+                self.buffer_stack.push(In);
+                self.pop_indents_to(IndentEntry::Delimiter);
+            },
+            Newline(_, column) => {
+                match self.indent_trigger {
+                    Some(IndentTrigger::Let) => {
+                        self.indent_trigger = None;
+                        self.indent_stack.push(IndentEntry::Let(column));
+                    },
+                    Some(IndentTrigger::Of) => {
+                        self.indent_trigger = None;
+                        self.indent_stack.push(IndentEntry::Case(column));
+                    },
+                    None => {
+                        self.locate_indent(column);
+                    },
+                }
+            },
+            any_other => {
+                return Some(any_other);
+            },
+        } }
+        self.next()
+    }
+}
+
+trait TokenIterator: Iterator<Item=ElmToken> {
+    fn filter_indent(self) -> FilterIndent<Self> where Self: Sized {
+        FilterIndent {
+            input : self,
+            indent_stack : Vec::new(),
+            indent_trigger : None,
+            buffer_stack: Vec::new(),
+        }
+    }
+}
+
+impl<T: Iterator<Item=ElmToken>> TokenIterator for T {}
 
 impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageTopDeclrs> {
     fn next_step(mut self) -> StreamParser<I,StageEof> {
         // TODO: this is flawed because it doesn't capture lazily the
         // tokens for a type declaration.
-        // TODO: Needs function and function type parsing.
         let mut top_levels = Vec::new();
         loop {
             match self.input.peek() {
                 Some(&Name(_)) | Some(&LParens) | Some(&Port) => {
-                    let unparsed_tokens : Vec<ElmToken> =
+                    let preparsed_tokens =
                         self.input
                             .by_ref()
                             .take_while(not_match!(ElmToken::Newline(_,0)))
-                            .collect();
-                    let preparsed_tokens : Vec<SpanToken> =
-                        filter_indent(unparsed_tokens)
-                            .into_iter()
+                            .filter_indent()
                             .enumerate()
-                            .map(|(i, token)| Ok((i, token, i+1)))
-                            .collect();
-                    let parsed_top_level = Right(
+                            .map(|(i, token)| Ok((i, token, i+1)));
+                    top_levels.push(Right(
                         parse_TopDeclr(preparsed_tokens)
                             .expect("Function Parsing Error")
-                    );
-                    top_levels.push(parsed_top_level);
+                    ));
                 },
                 Some(_) => {
-                    let toplevel_stream : Vec<SpanToken> =
+                    let toplevel_stream =
                         self.input
                             .by_ref()
                             .take_while(not_match!(ElmToken::Newline(_,0)))
                             .filter(not_match!(ElmToken::Newline(_,_)))
                             .enumerate()
-                            .map(|(i, token)| Ok((i, token, i+1)))
-                            .collect();
+                            .map(|(i, token)| Ok((i, token, i+1)));
                     top_levels.push(Right(
                         parse_TopDeclr(toplevel_stream)
                             .expect("Parsing Error")
@@ -354,12 +458,6 @@ pub struct Parser {
 ///
 /// * Lazily evaluate the source file rather than collect
 ///   preemptively all the AST
-///
-/// * Better API, including:
-///   * association between symbols in various location of the AST
-///
-/// Maybe this role is better filed with another data structure,
-/// which would be exposed to the outside world?
 impl Parser {
     pub fn new<I>(input: I) -> Parser where I:Iterator<Item=ElmToken> {
         let stream_parsed =

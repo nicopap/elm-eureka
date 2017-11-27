@@ -48,10 +48,10 @@ pub enum TopDeclr {
     DocString(String),
     TypeDeclr(TypeDeclr),
     TypeAlias(TypeAlias),
-    FunctionTypeDeclr(bool, Name, Type),
-    OperatorTypeDeclr(Name, Type),
-    FunctionDeclr(Name, Vec<Pattern>),
-    OperatorDeclr(Name, Vec<Pattern>),
+    FunctionAnnotation(bool, Name, Type),
+    OperatorAnnotation(Name, Type),
+    FunctionDeclr(Name, Vec<Pattern>, Expression),
+    OperatorDeclr(Name, Vec<Pattern>, Expression),
 }
 
 #[derive(Debug,Clone)]
@@ -123,6 +123,43 @@ pub enum Pattern {
     EmptyList,
     List(Vec<Pattern>),
     Decons(Vec<Pattern>),
+}
+
+#[derive(Debug,Clone)]
+pub enum Expression {
+    Record(Option<Name>, Vec<(Name, Expression)>),
+    List(Vec<Expression>),
+    Tuple(Vec<Expression>),
+    StringLit(String),
+    Character(String),
+    Number(String),
+    UnitType,
+    EmptyRecord,
+    EmptyList,
+    IfThenElse(Box<Expression>, Box<Expression>, Box<Expression>),
+    LetIn(Vec<Either<LetDeclaration,LetBind>>, Box<Expression>),
+    CaseOf(Box<Expression>, Vec<(Pattern, Expression)>),
+    Lambda(Vec<Pattern>, Box<Expression>),
+    InfixApplication(Vec<(Expression, Operator)>, Box<Expression>),
+    Application(Vec<Expression>),
+    Variable(Name),
+    PrefixOperator(Operator),
+    // Argument is arrity of the constructor
+    TupleConstructor(i16),
+}
+
+#[derive(Debug,Clone)]
+pub struct LetDeclaration {
+    pub annotation: Option<Type>,
+    pub name: Name,
+    pub arguments: Vec<Pattern>,
+    pub body: Expression,
+}
+
+#[derive(Debug,Clone)]
+pub struct LetBind {
+    pub pattern: Pattern,
+    pub body: Expression
 }
 
 
