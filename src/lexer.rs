@@ -101,7 +101,7 @@ fn into_token(text_token : String) -> ElmToken {
             ElmToken::Number(String::from(word)),
 
         _ =>
-            panic!(format!("{{{}}} was not a recognizable token!", text_token)),
+            panic!(format!("#{}# was not a recognizable token!", text_token)),
     }
 }
 
@@ -127,7 +127,7 @@ fn consume_into<I>(
             input.next();
             into.push(c);
         } else {
-            return ;
+            return
         }
     }
 }
@@ -140,7 +140,7 @@ fn consume_line_comment<I>(input: &mut Peekable<I>)
     while let Some(&c) = input.peek() {
         if c == '\n' { return }
         let _ = input.next();
-    };
+    }
 }
 
 /// Consumes a block comment. Handles properly nested
@@ -175,8 +175,8 @@ fn consume_block_comment<I>(input: &mut Peekable<I>)
         last = c;
         if depth == 0 {
             return (if is_doc { Some(accum) } else { None }, nl_consumed)
-        };
-    };
+        }
+    }
     (None, nl_consumed)
 }
 
@@ -221,7 +221,7 @@ fn consume_number<I>(input: &mut Peekable<I>, into: &mut String)
             input.next();
             into.push(c);
         }
-    };
+    }
 }
 
 /// Why use a string to represent the content of a char? well, escape
@@ -238,7 +238,7 @@ fn consume_char(input: &mut Iterator<Item=char>, into: &mut String) {
         }
         prev_is_escape = c == '\\' && !prev_is_escape;
         into.push(c);
-    };
+    }
 }
 
 /// This is the same parser as char, just ignores \"
@@ -252,7 +252,7 @@ fn consume_string(input: &mut Iterator<Item=char>, into: &mut String) -> i16 {
             return nl_consumed;
         }
         prev_is_escape = c == '\\' && !prev_is_escape;
-        into.push(c)
+        into.push(c);
     }
     nl_consumed
 }
@@ -291,8 +291,7 @@ fn consume_newline<I>(input: &mut Peekable<I>, line: i16)
 ///
 /// The lexer is a statefull adaptator that transforms
 /// a stream of characters into a stream of elm tokens.
-/// A token is a convinient data structures for parsing
-/// and building an abstract syntax tree.
+/// A token is a data structures to ease parsing.
 ///
 /// The lexer is an iterator, and does everything as
 /// tokens are requested from it. This is to offer
@@ -302,23 +301,24 @@ fn consume_newline<I>(input: &mut Peekable<I>, line: i16)
 /// You could collect into a vector all the tokens
 /// before processing, or you could defer up to the
 /// last moment the evaluation of tokens.
-pub struct Lexer<Stream: Iterator<Item=char>> {
-    input : Peekable<Stream>,
+pub struct Lexer<I: Iterator<Item=char>> {
+    input : Peekable<I>,
     line_loc : i16,
 }
 
-impl <Stream: Iterator<Item=char>> Lexer<Stream> {
+pub trait LexableIterator: Iterator<Item=char> {
     /// Creates a new lexer wrapping the
     /// character stream given as input.
-    pub fn new(input : Stream) -> Lexer<Stream> {
+    fn lex(self) -> Lexer<Self> where Self: Sized {
         Lexer {
-            input : input.peekable(),
-            line_loc : 1,
+            input: self.peekable(),
+            line_loc: 1,
         }
     }
 }
+impl<T: Iterator<Item=char>> LexableIterator for T {}
 
-impl <Stream: Iterator<Item=char>> Iterator for Lexer<Stream> {
+impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
     type Item = ElmToken;
 
     /// Spews tokens while consuming the input stream.
@@ -336,84 +336,82 @@ impl <Stream: Iterator<Item=char>> Iterator for Lexer<Stream> {
     /// The stream may terminate early for
     /// undeterminate reasons, mostly broken code
     fn next(&mut self) -> Option<ElmToken> {
-        let input = &mut self.input;
-        while let Some(next_char) = input.next() {
-            match next_char {
-                '\r' => { continue },
-                '\n' => {
-                    let (token, nl_consumed) = consume_newline(input, self.line_loc + 1);
-                    self.line_loc += nl_consumed + 1;
-                    return token;
-                },
-                c if c.is_whitespace() => { continue },
-                '[' => { return Some(ElmToken::LBracket) },
-                ']' => { return Some(ElmToken::RBracket) },
-                '(' => { return Some(ElmToken::LParens) },
-                ')' => { return Some(ElmToken::RParens) },
-                ',' => { return Some(ElmToken::Comma) },
-                '}' => { return Some(ElmToken::RBrace) },
-                '{' => {
-                    if input.peek().map_or(false, |&c| c == '-') {
-                        match consume_block_comment(input) {
-                            (Some(doc), nl_consumed) => {
-                                self.line_loc += nl_consumed;
-                                return Some(into_token(doc));
-                            },
-                            (None, nl_consumed) => {
-                                self.line_loc += nl_consumed;
-                                continue;
-                            }
-                        }
-                    } else {
-                        return Some(ElmToken::LBrace);
-                    };
-                },
-                '.' => {
-                    if input.peek().map_or(false, |&c| is_operator(c)) {
-                        let mut into_buffer = String::from(".");
-                        consume_operator(input, &mut into_buffer);
-                        return Some(into_token(into_buffer));
-                    } else if input.peek().map_or(false, |&c| c.is_alphabetic()) {
-                        let mut into_buffer = String::from(".");
-                        consume_name(input, &mut into_buffer);
-                        return Some(ElmToken::Name(into_buffer));
+        { let input = &mut self.input; match input.next()? {
+            '\r' => {},
+            '\n' => {
+                let (token, nl_consumed) =
+                    consume_newline(input, self.line_loc + 1);
+                self.line_loc += nl_consumed + 1;
+                return token
+            },
+            c if c.is_whitespace() => {},
+            '[' => { return Some(ElmToken::LBracket) },
+            ']' => { return Some(ElmToken::RBracket) },
+            '(' => { return Some(ElmToken::LParens) },
+            ')' => { return Some(ElmToken::RParens) },
+            ',' => { return Some(ElmToken::Comma) },
+            '{' => {
+                if input.peek().map_or(false, |&c| c == '-') {
+                    match consume_block_comment(input) {
+                        (Some(doc), nl_consumed) => {
+                            self.line_loc += nl_consumed;
+                            return Some(into_token(doc))
+                        },
+                        (None, nl_consumed) => self.line_loc += nl_consumed,
                     }
-                },
-                c if is_operator(c) => {
-                    if c == '-' && input.peek().map_or(false, |&c| c == '-') {
-                        consume_line_comment(input);
-                        continue;
-                    }
+                } else {
+                    return Some(ElmToken::LBrace)
+                }
+            },
+            '}' => { return Some(ElmToken::RBrace) },
+            '.' => {
+                if input.peek().map_or(false, |&c| is_operator(c)) {
+                    let mut into_buffer = String::from(".");
+                    consume_operator(input, &mut into_buffer);
+                    return Some(into_token(into_buffer))
+                } else if input.peek().map_or(false, |&c| c.is_alphabetic()) {
+                    let mut into_buffer = String::from(".");
+                    consume_name(input, &mut into_buffer);
+                    return Some(ElmToken::Name(into_buffer))
+                }
+            },
+            c if is_operator(c) => {
+                if c == '-' && input.peek().map_or(false, |&c| c == '-') {
+                    consume_line_comment(input);
+                } else {
                     let mut into_buffer : String = to_str!(c);
                     consume_operator(input, &mut into_buffer);
                     return Some(into_token(into_buffer));
-                },
-                c if c.is_alphabetic() => {
-                    let mut into_buffer : String = to_str!(c);
-                    consume_name(input, &mut into_buffer);
-                    return Some(into_token(into_buffer));
-                },
-                '_' => { return Some(ElmToken::Underscore) },
-                '"' => {
-                    let mut into_buffer = String::new();
-                    let nl_consumed = consume_string(input, &mut into_buffer);
-                    self.line_loc += nl_consumed;
-                    return Some(ElmToken::StringLit(into_buffer));
-                },
-                '\'' => {
-                    let mut into_buffer = String::new();
-                    consume_char(input, &mut into_buffer);
-                    return Some(ElmToken::Char(into_buffer));
-                },
-                c @ '0' ... '9' => {
-                    let mut into_buffer : String = to_str!(c);
-                    consume_number(input, &mut into_buffer);
-                    return Some(into_token(into_buffer));
-                },
-                c => { println!("######{}#####", c); return None },
-            }
-        };
-        return None;
+                }
+            },
+            c if c.is_alphabetic() => {
+                let mut into_buffer : String = to_str!(c);
+                consume_name(input, &mut into_buffer);
+                return Some(into_token(into_buffer))
+            },
+            '_' => { return Some(ElmToken::Underscore) },
+            '"' => {
+                let mut into_buffer = String::new();
+                let nl_consumed = consume_string(input, &mut into_buffer);
+                self.line_loc += nl_consumed;
+                return Some(ElmToken::StringLit(into_buffer))
+            },
+            '\'' => {
+                let mut into_buffer = String::new();
+                consume_char(input, &mut into_buffer);
+                return Some(ElmToken::Char(into_buffer));
+            },
+            c @ '0' ... '9' => {
+                let mut into_buffer : String = to_str!(c);
+                consume_number(input, &mut into_buffer);
+                return Some(into_token(into_buffer))
+            },
+            c => {
+                println!("######{}#####", c);
+                return None
+            },
+        } }
+        self.next()
     }
 }
 
@@ -439,10 +437,6 @@ main =
     , li [] [Name.Wow << text "Ananas"]
     , li [] [text 103 "Jus d'orange"]
     , li [] [text "Bœuf"]
-    , li [] [text "Soupe du jour"]
-    , li [] [text "Camembert"]
-    , li [] [text "Jacques Cousteau"]
-    , li [] [text "Baguette"]
     ]
 
 
@@ -453,8 +447,7 @@ main =
         use tokens::ElmToken::*;
 
         let str_input = String::from(UNORDERED_LIST_EXAMPLE);
-        let char_input = str_input.chars();
-        let lexer = Lexer::new(char_input);
+        let lexer = str_input.chars().lex();
         let token_vec = lexer.collect::<Vec<_>>();
         assert_eq!(
             token_vec, vec![Import, s!(Name,"Html"), Exposing, LParens,
@@ -477,15 +470,7 @@ Et maintenant le voyage au supermarché!
             LBracket, s!(Name,"text"), s!(Number, "103"), s!(StringLit,"Jus d'orange"), RBracket,
             Newline(14,4), Comma, s!(Name,"li"), LBracket, RBracket,
             LBracket, s!(Name,"text"), s!(StringLit,"Bœuf"), RBracket,
-            Newline(15,4), Comma, s!(Name,"li"), LBracket, RBracket,
-            LBracket, s!(Name,"text"), s!(StringLit,"Soupe du jour"), RBracket,
-            Newline(16,4), Comma, s!(Name,"li"), LBracket, RBracket,
-            LBracket, s!(Name,"text"), s!(StringLit,"Camembert"), RBracket,
-            Newline(17,4), Comma, s!(Name,"li"), LBracket, RBracket,
-            LBracket, s!(Name,"text"), s!(StringLit,"Jacques Cousteau"), RBracket,
-            Newline(18,4), Comma, s!(Name,"li"), LBracket, RBracket,
-            LBracket, s!(Name,"text"), s!(StringLit,"Baguette"), RBracket,
-            Newline(19,4), RBracket, Newline(22,0)]);
+            Newline(15,4), RBracket, Newline(18,0)]);
     }
     macro_rules! consumer_test {
         ($input_value:expr, $buffer_res:expr, $input_remain:expr, $to_test:ident) => (

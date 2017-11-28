@@ -9,7 +9,7 @@ use std::io::prelude::*;
 use std::io::BufReader;
 use std::fs::File;
 
-use elm_eureka::lexer::Lexer;
+use elm_eureka::lexer::LexableIterator;
 use elm_eureka::parser::Parser;
 use elm_eureka::packages_reader;
 
@@ -23,7 +23,7 @@ pub fn main() {
         let small_name = keywordify(module_name.clone());
         let file = File::open(source_path).unwrap();
         let reader = BufReader::new(file);
-        let lex = Lexer::new(reader.chars().map( |x| x.unwrap() ));
+        let lex = reader.chars().map(|x| x.unwrap()).lex();
         let tree = Parser::new(lex);
         println!("\t{}[label=\"{}\"];", small_name, module_name);
 

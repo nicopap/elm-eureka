@@ -13,7 +13,7 @@ use std::io::BufReader;
 use std::fs::File;
 use std::ops::IndexMut;
 
-use elm_eureka::lexer::Lexer;
+use elm_eureka::lexer::LexableIterator;
 use elm_eureka::tokens::ElmToken;
 use elm_eureka::packages_reader;
 
@@ -22,7 +22,7 @@ const NTHREAD:i32=1;
 fn lex_file(source_path : Box<Path>) -> Vec<ElmToken> {
     let file = File::open(source_path).unwrap();
     let reader = BufReader::new(file);
-    let lex = Lexer::new(reader.chars().map( |x| x.unwrap() ));
+    let lex = reader.chars().map(|x| x.unwrap()).lex();
     lex.collect()
 }
 

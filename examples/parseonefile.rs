@@ -4,12 +4,12 @@ use std::io::prelude::*;
 use std::io::BufReader;
 use std::fs::File;
 
-use elm_eureka::lexer::Lexer;
+use elm_eureka::lexer::LexableIterator;
 
 pub fn main() {
     let file = File::open("examples/elmjutsu-5k.elm").unwrap();
     let reader = BufReader::new(file);
-    let lex = Lexer::new(reader.chars().map( |x| x.unwrap() ));
+    let lex = reader.chars().map( |x| x.unwrap() ).lex();
 
     for token in lex {
         print!("{} ", token);

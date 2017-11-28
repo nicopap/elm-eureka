@@ -12,7 +12,7 @@ use std::io::BufReader;
 use std::fs::File;
 use std::ops::IndexMut;
 
-use elm_eureka::lexer::Lexer;
+use elm_eureka::lexer::LexableIterator;
 use elm_eureka::parser::Parser;
 use elm_eureka::packages_reader;
 use elm_eureka::ast::ExportList;
@@ -23,7 +23,7 @@ const NTHREAD:i32=1;
 fn parse_file(source_path : Box<Path>) -> Parser {
     let file = File::open(source_path).unwrap();
     let reader = BufReader::new(file);
-    let lex = Lexer::new(reader.chars().map( |x| x.unwrap() ));
+    let lex = reader.chars().map(|x| x.unwrap()).lex();
     Parser::new(lex)
 }
 
@@ -41,7 +41,10 @@ fn parse_and_feedback(
 pub fn main() {
     let packagepath = Path::new("examples/elm-spa-example");
     let source_info = packages_reader::info(packagepath).unwrap();
-    let sources = source_info.dependencies.into_iter().chain(source_info.source_files.into_iter());
+    let sources =
+        source_info.dependencies
+            .into_iter()
+            .chain(source_info.source_files.into_iter());
 
     let (send_processed, receive_processed) = channel();
     let mut send_channels : Vec<Sender<Option<(Box<Path>, String)>>> = Vec::new();

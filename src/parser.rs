@@ -228,7 +228,7 @@ impl fmt::Debug for IndentEntry {
 #[derive(Debug)]
 struct FilterIndent<I:Iterator<Item=ElmToken>> {
     input: I,
-    // Holdy information about the levels of indentation we are in, and
+    // Holds information about the levels of indentation we are in, and
     // if there is "enclosing" expressions that renders `Of` ending moot.
     indent_stack: Vec<IndentEntry>,
     // If a keyword into an expression needing indentation is found, put
@@ -332,9 +332,7 @@ impl<I:Iterator<Item=ElmToken>> Iterator for FilterIndent<I> {
         use self::ElmToken::*;
 
         if let Some(token) = self.buffer_stack.pop() { return Some(token) }
-        match self.input.next() {
-        None => return None,
-        Some(token) => match token {
+        match self.input.next()? { token => match token {
             LParens | LBrace | LBracket | If => {
                 self.indent_stack.push(IndentEntry::Delimiter);
                 return Some(token);
@@ -376,6 +374,9 @@ impl<I:Iterator<Item=ElmToken>> Iterator for FilterIndent<I> {
                 return Some(any_other);
             },
         } }
+        // if the match expression didn't return, we fall through to a
+        // recursive call to self. Note that this is definitively equivalent
+        // to a while loop.
         self.next()
     }
 }
