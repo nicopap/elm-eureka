@@ -29,9 +29,11 @@ extern crate serde_json;
 extern crate itertools;
 extern crate either;
 
-pub mod tokens;
 pub mod packages_reader;
-pub mod lexer;
-pub mod parser;
-pub mod ast;
-mod elm_parse;
+mod tokens;
+mod lexer;
+mod parser;
+pub use tokens::ElmToken;
+pub use lexer::LexableIterator;
+pub use parser::Parser;
+pub use parser::tree;

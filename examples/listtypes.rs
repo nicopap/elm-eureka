@@ -8,9 +8,9 @@ use std::io::BufReader;
 use std::fs::File;
 use std::env::args;
 
-use elm_eureka::lexer::LexableIterator;
-use elm_eureka::parser::Parser;
-use elm_eureka::ast::{Type,Record};
+use elm_eureka::Parser;
+use elm_eureka::tree::{Type,Record};
+use elm_eureka::tree;
 
 trait Descriptible {
     fn describe(&self) -> String;
@@ -78,17 +78,22 @@ pub fn main() {
     let file_to_read =
         args().nth(1).unwrap_or(String::from("examples/elmjutsu-5k.elm"));
     let file = File::open(file_to_read).unwrap();
-    let reader = BufReader::new(file);
-    let lex = reader.chars().map(|x|x.unwrap()).lex();
-    let parser = Parser::new(lex);
-    let (aliases, declars) = parser.get_types();
-    for type_alias in aliases {
-        println!("type alias {}, is:\n  {}",type_alias.name, type_alias.type_.describe());
-    }
-    for type_declr in declars {
-        println!("type {}, is:",type_declr.name);
-        for &(ref alt_name, ref alt_type) in type_declr.alternatives.iter() {
-            println!("  {} of {}", alt_name, alt_type.describe());
+    let char_stream = BufReader::new(file).chars().map(|x|x.unwrap());
+    let parser = Parser::new(char_stream);
+    for &tree::TypeDeclaration { ref name, ref genre, .. }
+    in parser.get_types() {
+        match *genre {
+            tree::TypeGenre::Alias(ref type_) => {
+                println!("type alias {}, is:\n  {}", name, type_.describe());
+
+            },
+            tree::TypeGenre::Full(ref constructors) => {
+                println!("type {}, is:", name);
+                for &(ref alt_name, ref alt_type)
+                in constructors.iter() {
+                    println!("  {} of {}", alt_name, alt_type.describe());
+                }
+            },
         }
     }
 }

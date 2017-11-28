@@ -1,18 +1,23 @@
-//! An efficient implementation of an elm parser
-
+//! A lazily evaluated parser
 use std::iter::{Peekable,SkipWhile};
 use std::fmt;
 
 use itertools::{Coalesce,Itertools};
-use either::Either;
-use either::Either::Right;
 
-use ast;
-use elm_parse::{parse_ModuleDeclr,parse_Import, parse_TopDeclr};
-use tokens::{ElmToken,LexError};
+use super::grammar::{parse_ModuleDeclr,parse_Import, parse_TopDeclr};
+use super::tree;
+use ::tokens::{ElmToken,LexError};
+use ::lexer::{LexableIterator,Lexer};
 use self::ElmToken::{DocComment, Newline, Name, LParens, Port};
 
-type SpanToken = Result<(usize, ElmToken, usize), LexError>;
+macro_rules! not_match {
+    ($to_match:pat) => ( |x| match *x { $to_match => false, _ => true })
+}
+macro_rules! is_match {
+    ($to_match:pat) => ( |x| match x { $to_match => true, _ => false })
+}
+
+// type SpanToken = Result<(usize, ElmToken, usize), LexError>;
 
 // wrappers to deal with lazy input stream reification.
 type CoalSig<X> = fn(X, X)->Result<X, (X,X)>;
@@ -23,27 +28,27 @@ type OMG<I>=Peekable<Coalesce<
 
 struct StageModuleDeclr;
 struct StageModuleDoc {
-    pub module_declr: ast::ModuleDeclr,
+    module_declr: tree::ModuleDeclr,
 }
 struct StageImports {
-    pub module_declr: ast::ModuleDeclr,
-    pub module_doc: Option<String>,
+    module_declr: tree::ModuleDeclr,
+    module_doc: Option<String>,
 }
 
 // Possible alternate implementation to keep in mind:
 // Have an iterator over the Imports rather than
 // collect them directly into a Vec (but fuck that!)
 struct StageTopDeclrs {
-    pub module_declr: ast::ModuleDeclr,
-    pub module_doc: Option<String>,
-    pub module_imports: Vec<ast::ElmImport>,
+    module_declr: tree::ModuleDeclr,
+    module_doc: Option<String>,
+    module_imports: Vec<tree::ElmImport>,
 }
 
 struct StageEof {
-    pub module_declr: ast::ModuleDeclr,
-    pub module_doc: Option<String>,
-    pub module_imports: Vec<ast::ElmImport>,
-    pub top_levels: Vec<Either<Vec<SpanToken>,ast::TopDeclr>>,
+    module_declr: tree::ModuleDeclr,
+    module_doc: Option<String>,
+    module_imports: Vec<tree::ElmImport>,
+    top_levels: Vec<tree::TopDeclr>,
 }
 
 /// A parser with different levels of processing state.
@@ -62,10 +67,8 @@ struct StageEof {
 /// `StreamParser` over a given *stage* and return a
 /// `StreamParser` with its new *stage*. This is possible
 /// thanks to Rust's affine typing: we *consume* the
-/// previous stage to *yield* a new one.
-///
-/// The stages that divides a source file were choosen
-/// by ease of implementation and mean of use:
+/// previous stage to *yield* a new one. The stages
+/// are the following:
 ///
 /// * It uses the newline at column 0 token to split
 ///   the input into meaningfull parsable units.
@@ -87,23 +90,19 @@ struct StageEof {
 ///    (currently only parses type declarations)
 ///
 /// 5. EOF: Nothing more to be parsed.
-struct StreamParser<I: Iterator<Item=ElmToken>, Stage> {
+struct StreamParser<I: Iterator<Item=ElmToken>, S = StageModuleDeclr> {
     input : OMG<I>,
-    stage : Stage,
+    stage : S,
 }
 
-macro_rules! not_match {
-    ($to_match:pat) => ( |x| match *x { $to_match => false, _ => true })
-}
-macro_rules! is_match {
-    ($to_match:pat) => ( |x| match x { $to_match => true, _ => false })
-}
-
-impl<I:Iterator<Item=ElmToken>> StreamParser<I, StageModuleDeclr> {
+/// Converts a token stream into a parser
+trait IntoParsed: Iterator<Item=ElmToken> {
     /// Add some processing to the input token stream and embed
     /// into the Iterator adaptator StreamParser at its initial
     /// stage.
-    pub fn new(input : I) -> StreamParser<I, StageModuleDeclr> {
+    fn into_parsed(self) -> StreamParser<Self,StageModuleDeclr>
+        where Self: Sized
+    {
         let is_newline : fn(&ElmToken)->bool = is_match!(&Newline(_,_));
         let remove_dup_newlines : CoalSig<ElmToken> = |prev,cur| {
             match (prev,cur) {
@@ -115,26 +114,26 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I, StageModuleDeclr> {
         };
         StreamParser {
             input :
-                input
-                    .skip_while(is_newline)
+                self.skip_while(is_newline)
                     .coalesce(remove_dup_newlines)
                     .peekable(),
             stage : StageModuleDeclr,
         }
     }
 }
+impl<T: Iterator<Item=ElmToken>> IntoParsed for T {}
 
 impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageModuleDeclr> {
     fn next_step(mut self) -> StreamParser<I,StageModuleDoc> {
         // Consumes the module declaration, also consumes the next newline.
-        let declr_stream : Vec<SpanToken> =
+        let declr_stream =
             self.input
                 .by_ref()
                 .take_while(not_match!(Newline(_,0)))
                 .filter(not_match!(Newline(_,_)))
                 .enumerate()
                 .map(|(i, token)| Ok((i, token, i+1)))
-                .collect();
+                .collect::<Vec<_>>();
         let module_declr = parse_ModuleDeclr(declr_stream).expect("Parsing Error");
         StreamParser {
             input : self.input,
@@ -173,7 +172,7 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageModuleDoc> {
 
 impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageImports> {
     fn next_step(mut self) -> StreamParser<I,StageTopDeclrs> {
-        let mut module_imports : Vec<ast::ElmImport> = Vec::new();
+        let mut module_imports : Vec<tree::ElmImport> = Vec::new();
         while self.input.peek() == Some(&ElmToken::Import) {
             let import_stream =
                 self.input
@@ -192,6 +191,64 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageImports> {
             stage: StageTopDeclrs{module_declr, module_doc, module_imports},
         }
     }
+}
+
+
+impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageTopDeclrs> {
+    fn next_step(mut self) -> StreamParser<I,StageEof> {
+        // TODO: this is flawed because it doesn't capture lazily the
+        // tokens for a type declaration.
+        let mut top_levels = Vec::new();
+        loop {
+            match self.input.peek() {
+                Some(&Name(_)) | Some(&LParens) | Some(&Port) => {
+                    let preparsed_tokens =
+                        self.input
+                            .by_ref()
+                            .take_while(not_match!(ElmToken::Newline(_,0)))
+                            .filter_indent()
+                            .enumerate()
+                            .map(|(i, token)| Ok((i, token, i+1)));
+                    top_levels.push(
+                        parse_TopDeclr(preparsed_tokens)
+                            .expect("Function Parsing Error")
+                    );
+                },
+                Some(_) => {
+                    let toplevel_stream =
+                        self.input
+                            .by_ref()
+                            .take_while(not_match!(ElmToken::Newline(_,0)))
+                            .filter(not_match!(ElmToken::Newline(_,_)))
+                            .enumerate()
+                            .map(|(i, token)| Ok((i, token, i+1)));
+                    top_levels.push(
+                        parse_TopDeclr(toplevel_stream)
+                            .expect("Parsing Error")
+                    );
+                },
+                None  => {
+                    break;
+                },
+            }
+        }
+        let module_declr = self.stage.module_declr;
+        let module_doc = self.stage.module_doc;
+        let module_imports = self.stage.module_imports;
+        StreamParser {
+            input: self.input,
+            stage: StageEof {
+                module_declr,
+                module_doc,
+                module_imports,
+                top_levels,
+            },
+        }
+    }
+}
+
+impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageEof> {
+    fn next_step(self) -> StreamParser<I,StageEof> { self }
 }
 
 #[derive(PartialEq, Copy, Clone)] enum IndentEntry {
@@ -391,115 +448,125 @@ trait TokenIterator: Iterator<Item=ElmToken> {
         }
     }
 }
-
 impl<T: Iterator<Item=ElmToken>> TokenIterator for T {}
 
-impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageTopDeclrs> {
-    fn next_step(mut self) -> StreamParser<I,StageEof> {
-        // TODO: this is flawed because it doesn't capture lazily the
-        // tokens for a type declaration.
-        let mut top_levels = Vec::new();
-        loop {
-            match self.input.peek() {
-                Some(&Name(_)) | Some(&LParens) | Some(&Port) => {
-                    let preparsed_tokens =
-                        self.input
-                            .by_ref()
-                            .take_while(not_match!(ElmToken::Newline(_,0)))
-                            .filter_indent()
-                            .enumerate()
-                            .map(|(i, token)| Ok((i, token, i+1)));
-                    top_levels.push(Right(
-                        parse_TopDeclr(preparsed_tokens)
-                            .expect("Function Parsing Error")
-                    ));
-                },
-                Some(_) => {
-                    let toplevel_stream =
-                        self.input
-                            .by_ref()
-                            .take_while(not_match!(ElmToken::Newline(_,0)))
-                            .filter(not_match!(ElmToken::Newline(_,_)))
-                            .enumerate()
-                            .map(|(i, token)| Ok((i, token, i+1)));
-                    top_levels.push(Right(
-                        parse_TopDeclr(toplevel_stream)
-                            .expect("Parsing Error")
-                    ));
-                },
-                None  => {
-                    break;
-                },
-            }
-        }
-        let module_declr = self.stage.module_declr;
-        let module_doc = self.stage.module_doc;
-        let module_imports = self.stage.module_imports;
-        StreamParser {
-            input: self.input,
-            stage: StageEof {
-                module_declr,
-                module_doc,
-                module_imports,
-                top_levels,
+fn into_tree(full_parse: StageEof) -> tree::ElmModule {
+    let StageEof {module_declr, module_doc, module_imports, top_levels} = full_parse;
+    let tree::ModuleDeclr {name, exports} = module_declr;
+    let doc = module_doc;
+    let imports = module_imports;
+    let (list_ports, infixities, functions, types) =
+        tree::into_tree(top_levels.into_iter());
+    let ports = if list_ports.is_empty() { None } else { Some(list_ports) };
+    tree::ElmModule {
+        name,
+        exports,
+        doc,
+        imports,
+        types,
+        functions,
+        infixities,
+        ports
+    }
+}
+
+#[allow(dead_code)]
+enum ParserState<I:Iterator<Item=ElmToken>> {
+    StageModuleDeclr(StreamParser<I,StageModuleDeclr>),
+    StageModuleDoc(StreamParser<I,StageModuleDoc>),
+    StageImports(StreamParser<I,StageImports>),
+    StageTopDeclrs(StreamParser<I,StageTopDeclrs>),
+    StageEof(StreamParser<I,StageEof>),
+    StageFullyParsed(tree::ElmModule),
+}
+
+pub struct Parser<I:Iterator<Item=char>>(ParserState<Lexer<I>>);
+
+impl<I> Parser<I>
+    where I:Iterator<Item=char>
+{
+    pub fn new(input: I) -> Parser<I> {
+        use self::ParserState as PS;
+        let complete_parser = input
+            .lex()
+            .into_parsed()
+            .next_step()
+            .next_step()
+            .next_step()
+            .next_step();
+        let full_tree = into_tree(complete_parser.stage);
+        Parser(PS::StageFullyParsed(full_tree))
+    }
+
+    pub fn get_module_exports<'a>(&'a self) -> &'a tree::ExportList {
+        use self::ParserState as PS;
+        match self.0 {
+            PS::StageFullyParsed(ref complete_parse_tree) => {
+                &complete_parse_tree.exports
             },
+            _ => panic!("not yet implemented, silly boy"),
+        }
+    }
+
+    pub fn get_module_name<'a>(&'a self) -> &'a String {
+        use self::ParserState as PS;
+        match self.0 {
+            PS::StageFullyParsed(ref complete_parse_tree) => {
+                &complete_parse_tree.name
+            },
+            _ => panic!("not yet implemented, silly boy"),
+        }
+    }
+
+    pub fn get_module_doc<'a>(&'a self) -> &'a Option<String> {
+        use self::ParserState as PS;
+        match self.0 {
+            PS::StageFullyParsed(ref complete_parse_tree) => {
+                &complete_parse_tree.doc
+            },
+            _ => panic!("not yet implemented, silly boy"),
+        }
+    }
+
+    pub fn get_imports<'a>(&'a self) -> &'a Vec<tree::ElmImport> {
+        use self::ParserState as PS;
+        match self.0 {
+            PS::StageFullyParsed(ref complete_parse_tree) => {
+                &complete_parse_tree.imports
+            },
+            _ => panic!("not yet implemented, silly boy"),
+        }
+    }
+
+    pub fn get_types<'a>(&'a self) -> &'a Vec<tree::TypeDeclaration> {
+        use self::ParserState as PS;
+        match self.0 {
+            PS::StageFullyParsed(ref complete_parse_tree) => {
+                &complete_parse_tree.types
+            },
+            _ => panic!("not yet implemented, silly boy"),
+        }
+    }
+
+    pub fn into_parse_tree(self) -> tree::ElmModule {
+        use self::ParserState as PS;
+        match self.0 {
+            PS::StageFullyParsed(complete_parse_tree) => {
+                complete_parse_tree
+            },
+            _ => panic!("not yet implemented, silly boy"),
         }
     }
 }
 
-#[derive(Debug)]
-pub struct Parser {
-    module_declr: ast::ModuleDeclr,
-    module_doc: Option<String>,
-    imports: Vec<ast::ElmImport>,
-    top_levels: Vec<ast::TopDeclr>,
-}
-
-/// This needs a lot of work. Planned features:
-///
-/// * Lazily evaluate the source file rather than collect
-///   preemptively all the AST
-impl Parser {
-    pub fn new<I>(input: I) -> Parser where I:Iterator<Item=ElmToken> {
-        let stream_parsed =
-            StreamParser::new(input)
-                .next_step().next_step().next_step().next_step()
-                .stage;
-        let proc_top_levels =
-            stream_parsed.top_levels
-                .into_iter()
-                .map(Either::right)
-                .flat_map(|op| op.into_iter())
-                .collect();
-        Parser {
-            module_declr: stream_parsed.module_declr,
-            module_doc: stream_parsed.module_doc,
-            imports: stream_parsed.module_imports,
-            top_levels: proc_top_levels,
+impl<I:Iterator<Item=char>> fmt::Debug for Parser<I> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::ParserState as PS;
+        match self.0 {
+            PS::StageFullyParsed(ref complete_parse_tree) => {
+                write!(f, "{:#1?}", complete_parse_tree)
+            },
+            _ => panic!("not yet implemented, silly boy"),
         }
-    }
-
-    pub fn get_module_doc(&self) -> &Option<String> {
-        &self.module_doc
-    }
-    pub fn get_module_declr(&self) -> &ast::ModuleDeclr {
-        &self.module_declr
-    }
-    pub fn get_imports(&self) -> &Vec<ast::ElmImport> {
-        &self.imports
-    }
-    pub fn get_types(&self) -> (Vec<&ast::TypeAlias>, Vec<&ast::TypeDeclr>) {
-        use ast::TopDeclr::{TypeAlias,TypeDeclr};
-        let type_aliases =
-            self.top_levels.iter()
-                .map(|x| match x { &TypeAlias(ref v) => Some(v), _ => None })
-                .flat_map(|op| op.into_iter())
-                .collect::<Vec<&ast::TypeAlias>>();
-        let type_declrs =
-            self.top_levels.iter()
-                .map(|x| match x { &TypeDeclr(ref v) => Some(v), _ => None })
-                .flat_map(|op| op.into_iter())
-                .collect::<Vec<&ast::TypeDeclr>>();
-        (type_aliases, type_declrs)
     }
 }

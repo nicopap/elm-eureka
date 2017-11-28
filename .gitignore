@@ -4,4 +4,4 @@ Cargo.lock
 examples/friendsketch
 examples/elm-spa-example
 examples/elmjutsu-5k.elm
-src/elm_parse.rs
+src/parser/grammar.rs

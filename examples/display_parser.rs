@@ -9,15 +9,14 @@ use std::io::BufReader;
 use std::fs::File;
 use std::env::args;
 
-use elm_eureka::lexer::LexableIterator;
-use elm_eureka::parser::Parser;
+use elm_eureka::Parser;
 
 pub fn main() {
     let file_to_read =
         args().nth(1).unwrap_or(String::from("examples/elmjutsu-5k.elm"));
     let file = File::open(file_to_read).unwrap();
     let reader = BufReader::new(file);
-    let lex = reader.chars().map(|x| x.unwrap()).lex();
-    let parser = Parser::new(lex);
+    let char_stream = reader.chars().map(|x| x.unwrap());
+    let parser = Parser::new(char_stream);
     println!("{:#?}", parser);
 }

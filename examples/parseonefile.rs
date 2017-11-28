@@ -4,7 +4,7 @@ use std::io::prelude::*;
 use std::io::BufReader;
 use std::fs::File;
 
-use elm_eureka::lexer::LexableIterator;
+use elm_eureka::LexableIterator;
 
 pub fn main() {
     let file = File::open("examples/elmjutsu-5k.elm").unwrap();

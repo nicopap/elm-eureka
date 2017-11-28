@@ -9,7 +9,7 @@
 //! An actual AST instead of just a list of top level declaration
 
 use either::Either;
-use either::Either::{Left,Right};
+
 use tokens::ElmToken;
 
 pub type Name=String;
@@ -55,6 +55,29 @@ pub enum TopDeclr {
 }
 
 #[derive(Debug,Clone)]
+pub enum FunctionKind {
+    Operator,
+    Regular,
+}
+
+#[derive(Debug,Clone)]
+pub struct FunctionDeclaration {
+    pub annotation: Option<Type>,
+    pub doc: Option<String>,
+    pub name: Name,
+    pub kind: FunctionKind,
+    pub arguments: Vec<Pattern>,
+    pub body: Expression
+}
+
+#[derive(Debug,Clone)]
+pub struct PortDeclaration {
+    pub annotation: Type,
+    pub doc: Option<String>,
+    pub name: Name,
+}
+
+#[derive(Debug,Clone)]
 pub struct TypeAlias {
     pub name: Name,
     pub type_variables: Vec<Name>,
@@ -72,8 +95,25 @@ pub struct TypeDeclr {
 }
 
 #[derive(Debug,Clone)]
+pub enum TypeGenre {
+    Alias(Type),
+    Full(Vec<(Name,Vec<Type>)>),
+}
+
+#[derive(Debug,Clone)]
+pub struct TypeDeclaration {
+    pub name: Name,
+    pub type_variables: Vec<Name>,
+    pub genre: TypeGenre,
+    pub doc: Option<String>,
+}
+
+#[derive(Debug,Clone)]
+pub enum Associativity { Left, Right }
+
+#[derive(Debug,Clone)]
 pub struct OperPriority {
-    pub associativity: Either<(),()>,
+    pub associativity: Associativity,
     pub priority: u8,
     pub operator: Operator,
 }
@@ -144,7 +184,7 @@ pub enum Expression {
     Application(Vec<Expression>),
     Variable(Name),
     PrefixOperator(Operator),
-    // Argument is arrity of the constructor
+    // i16 is the arrity of the constructor
     TupleConstructor(i16),
 }
 
@@ -162,25 +202,110 @@ pub struct LetBind {
     pub body: Expression
 }
 
+#[derive(Debug,Clone)]
+pub struct ElmModule {
+    pub name: Name,
+    pub exports: ExportList,
+    pub doc: Option<String>,
+    pub imports: Vec<ElmImport>,
+    pub types: Vec<TypeDeclaration>,
+    pub functions: Vec<FunctionDeclaration>,
+    pub infixities: Vec<OperPriority>,
+    pub ports: Option<Vec<PortDeclaration>>,
+}
 
-pub struct LazilyParsed<I,T>(Either<I,Option<T>>)
+pub fn into_tree<I:Iterator<Item=TopDeclr> + Sized>(declrs : I)
+    -> (Vec<PortDeclaration>,
+        Vec<OperPriority>,
+        Vec<FunctionDeclaration>,
+        Vec<TypeDeclaration>)
+{
+    use self::TopDeclr as TD;
+
+    let mut ports = Vec::new();
+    let mut infixities = Vec::new();
+    let mut functions = Vec::new();
+    let mut types = Vec::new();
+    let mut last_docstring : Option<String> = None;
+    let mut last_annotation : Option<Type> = None;
+    for top_declr in declrs { match top_declr {
+        TD::OperPriority(oper_priority) => {
+            infixities.push(oper_priority);
+        },
+        TD::DocString(content) => {
+            last_docstring = Some(content);
+        },
+        TD::TypeDeclr(TypeDeclr{name, type_variables, alternatives}) => {
+            let doc = last_docstring.take();
+            let genre = TypeGenre::Full(alternatives);
+            types.push(TypeDeclaration {name, type_variables, genre, doc})
+        },
+        TD::TypeAlias(TypeAlias{name, type_, type_variables}) => {
+            let doc = last_docstring.take();
+            let genre = TypeGenre::Alias(type_);
+            types.push(TypeDeclaration {name, type_variables, genre, doc})
+        },
+        TD::FunctionAnnotation(true, name, annotation) => {
+            let doc = last_docstring.take();
+            ports.push(PortDeclaration {doc, name, annotation})
+        },
+        TD::FunctionAnnotation(false, _, type_) => {
+            last_annotation = Some(type_);
+        },
+        TD::OperatorAnnotation(_, type_) => {
+            last_annotation = Some(type_);
+        },
+        TD::FunctionDeclr(name, arguments, body) => {
+            let doc = last_docstring.take();
+            let kind = FunctionKind::Regular;
+            let annotation = last_annotation.take();
+            functions.push(FunctionDeclaration {
+                annotation,
+                doc,
+                name,
+                kind,
+                arguments,
+                body
+            })
+        },
+        TD::OperatorDeclr(name, arguments, body) => {
+            let doc = last_docstring.take();
+            let kind = FunctionKind::Operator;
+            let annotation = last_annotation.take();
+            functions.push(FunctionDeclaration {
+                annotation,
+                doc,
+                name,
+                kind,
+                arguments,
+                body
+            })
+        },
+    } }
+    (ports, infixities, functions, types)
+}
+
+pub struct LazilyParsed<I,T>(Option<I>,Option<T>)
     where I: IntoIterator<Item=ElmToken>;
 
 impl <I,T>LazilyParsed<I,T>
     where I: IntoIterator<Item=ElmToken>,
           T: Parsable<I> + Sized
 {
-    fn content(self) -> Option<T> {
-        match self.0 {
-            Left(unparsed) => T::parse(unparsed), //TODO: keep result of parse
-            Right(parsed) => parsed,
-        }
+    pub fn new(input: I) -> LazilyParsed<I,T> {
+        LazilyParsed(Some(input),None)
     }
-    fn evaluate(self) -> LazilyParsed<I,T> {
-        match self.0 {
-            Left(unparsed) => LazilyParsed(Right(T::parse(unparsed))),
-            Right(_) => self,
+
+    pub fn content(&mut self) -> &Option<T> {
+        if let Some(token_stream) = self.0.take() {
+            self.1 = T::parse(token_stream)
         }
+        &self.1
+    }
+
+    pub fn evaluate(self) -> LazilyParsed<I,T> {
+        let token_stream = self.0;
+        LazilyParsed(None,token_stream.and_then(T::parse))
     }
 }
 

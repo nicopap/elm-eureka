@@ -9,8 +9,7 @@ use std::io::prelude::*;
 use std::io::BufReader;
 use std::fs::File;
 
-use elm_eureka::lexer::LexableIterator;
-use elm_eureka::parser::Parser;
+use elm_eureka::Parser;
 use elm_eureka::packages_reader;
 
 pub fn main() {
@@ -23,12 +22,11 @@ pub fn main() {
         let small_name = keywordify(module_name.clone());
         let file = File::open(source_path).unwrap();
         let reader = BufReader::new(file);
-        let lex = reader.chars().map(|x| x.unwrap()).lex();
-        let tree = Parser::new(lex);
+        let char_stream = reader.chars().map(|x| x.unwrap());
+        let parser = Parser::new(char_stream);
         println!("\t{}[label=\"{}\"];", small_name, module_name);
 
-        let imports = tree.get_imports();
-        for import in imports {
+        for import in parser.get_imports() {
             let import_name : &String = &import.global_name;
             if !sources.source_files.contains_key(import_name) {continue;}
             let small_import_name = keywordify(import_name.clone());
