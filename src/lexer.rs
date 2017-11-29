@@ -77,7 +77,7 @@ fn into_token(text_token : String) -> ElmToken {
         "else" => ElmToken::Else,
         "|" => ElmToken::Pipe,
         "=" => ElmToken::Assign,
-        ":" => ElmToken::TypeDeclr,
+        ":" => ElmToken::Colon,
         "type" => ElmToken::Type,
         "infixr" => ElmToken::Infixr,
         "infixl" => ElmToken::Infixl,
@@ -306,6 +306,8 @@ pub struct Lexer<I: Iterator<Item=char>> {
     line_loc : i16,
 }
 
+/// Implements the ability to convert a character stream
+/// into a token stream.
 pub trait LexableIterator: Iterator<Item=char> {
     /// Creates a new lexer wrapping the
     /// character stream given as input.

@@ -23,7 +23,7 @@ pub fn main() {
         let file = File::open(source_path).unwrap();
         let reader = BufReader::new(file);
         let char_stream = reader.chars().map(|x| x.unwrap());
-        let parser = Parser::new(char_stream);
+        let mut parser = Parser::new(char_stream);
         println!("\t{}[label=\"{}\"];", small_name, module_name);
 
         for import in parser.get_imports() {

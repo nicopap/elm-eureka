@@ -9,8 +9,8 @@ use std::fs::File;
 use std::env::args;
 
 use elm_eureka::Parser;
-use elm_eureka::tree::{Type,Record};
-use elm_eureka::tree;
+use elm_eureka::parser::tree::{Type,Record};
+use elm_eureka::parser::tree;
 
 trait Descriptible {
     fn describe(&self) -> String;
@@ -79,7 +79,7 @@ pub fn main() {
         args().nth(1).unwrap_or(String::from("examples/elmjutsu-5k.elm"));
     let file = File::open(file_to_read).unwrap();
     let char_stream = BufReader::new(file).chars().map(|x|x.unwrap());
-    let parser = Parser::new(char_stream);
+    let mut parser = Parser::new(char_stream);
     for &tree::TypeDeclaration { ref name, ref genre, .. }
     in parser.get_types() {
         match *genre {

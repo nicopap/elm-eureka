@@ -14,7 +14,7 @@ use std::ops::IndexMut;
 
 use elm_eureka::Parser;
 use elm_eureka::packages_reader;
-use elm_eureka::tree;
+use elm_eureka::parser::tree;
 
 //There is a race condition somehow????
 //FIXME: if there is more than 1 thread, stuff breaks
@@ -22,13 +22,22 @@ const NTHREAD:i32=1;
 
 fn parse_and_feedback(
     receive: Receiver<Option<(Box<Path>, String)>>,
-    send: Sender<Option<(String, tree::ElmModule)>>
+    send: Sender<Option<(String,
+                         String,
+                         Option<String>,
+                         tree::ExportList,
+                         Vec<tree::ElmImport>
+                        )>>
 ) {
     while let Some((source_path, module_name)) = receive.recv().unwrap() {
         let file = File::open(source_path).unwrap();
         let char_stream = BufReader::new(file).chars().map(|x| x.unwrap());
-        let parse_tree = Parser::new(char_stream).into_parse_tree();
-        send.send(Some((module_name, parse_tree))).unwrap();
+        let mut parser = Parser::new(char_stream);
+        let exports = parser.get_module_exports().clone();
+        let imports = parser.get_imports().to_vec();
+        let name = parser.get_module_name().clone();
+        let doc = parser.get_module_doc().clone();
+        send.send(Some((module_name, name,doc,exports,imports))).unwrap();
     }
     send.send(None).unwrap();
 }
@@ -60,19 +69,18 @@ pub fn main() {
     for chan in send_channels {
         chan.send(None).unwrap();
     }
-    while let Some((module, tree)) = receive_processed.recv().unwrap() {
+    while let Some((module, name,doc,exports,imports)) = receive_processed.recv().unwrap() {
         let module_doc : String =
-            tree.doc
-                .clone()
+            doc .clone()
                 .map(|x| x.chars().take_while(|&c| c != '\n').collect())
                 .unwrap_or(String::from("No docstrings :("));
 
-        let module_name = &tree.name;
-        let module_exports = match tree.exports {
+        let module_name = &name;
+        let module_exports = match exports {
             tree::ExportList::Unqualified => format!("{}", "unqualified"),
             tree::ExportList::List(ref exports) => format!("{:?}", exports),
         };
-        let module_imports = format!("{:?}", tree.imports);
+        let module_imports = format!("{:?}", imports);
         println!("
             #### {} ####
             name: {}

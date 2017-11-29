@@ -1,16 +1,14 @@
-//! Datastructures to support an elm AST
+//! An elm parse tree
 //!
-//! The AST is built around meaningfull data
-//! rather than code representation. Though
-//! it should be fine to convert back to code
-//! from the AST, with minor loss.
+//! This is a collection of structures to represent
+//! parsed elm files.
 //!
-//! # Planned
-//! An actual AST instead of just a list of top level declaration
+//! This is not intended for use by external crate.
+//! I intend to only export the types that enter into
+//! the construction of the global parse tree (ElmModule)
+
 
 use either::Either;
-
-use tokens::ElmToken;
 
 pub type Name=String;
 pub type Operator=String;
@@ -285,36 +283,3 @@ pub fn into_tree<I:Iterator<Item=TopDeclr> + Sized>(declrs : I)
     (ports, infixities, functions, types)
 }
 
-pub struct LazilyParsed<I,T>(Option<I>,Option<T>)
-    where I: IntoIterator<Item=ElmToken>;
-
-impl <I,T>LazilyParsed<I,T>
-    where I: IntoIterator<Item=ElmToken>,
-          T: Parsable<I> + Sized
-{
-    pub fn new(input: I) -> LazilyParsed<I,T> {
-        LazilyParsed(Some(input),None)
-    }
-
-    pub fn content(&mut self) -> &Option<T> {
-        if let Some(token_stream) = self.0.take() {
-            self.1 = T::parse(token_stream)
-        }
-        &self.1
-    }
-
-    pub fn evaluate(self) -> LazilyParsed<I,T> {
-        let token_stream = self.0;
-        LazilyParsed(None,token_stream.and_then(T::parse))
-    }
-}
-
-/// An entity (usually a node of the AST) that can be parsed
-/// from an ordered collection of tokens.
-pub trait Parsable<I>
-    where I: IntoIterator<Item=ElmToken>,
-          Self: Sized,
-{
-    /// parse, with success or failure
-    fn parse(I) -> Option<Self>;
-}

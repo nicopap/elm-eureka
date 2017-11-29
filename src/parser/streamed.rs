@@ -1,12 +1,13 @@
 //! A lazily evaluated parser
 use std::iter::{Peekable,SkipWhile};
 use std::fmt;
+use std::mem::replace;
 
 use itertools::{Coalesce,Itertools};
 
 use super::grammar::{parse_ModuleDeclr,parse_Import, parse_TopDeclr};
 use super::tree;
-use ::tokens::{ElmToken,LexError};
+use ::tokens::ElmToken;
 use ::lexer::{LexableIterator,Lexer};
 use self::ElmToken::{DocComment, Newline, Name, LParens, Port};
 
@@ -103,7 +104,7 @@ trait IntoParsed: Iterator<Item=ElmToken> {
     fn into_parsed(self) -> StreamParser<Self,StageModuleDeclr>
         where Self: Sized
     {
-        let is_newline : fn(&ElmToken)->bool = is_match!(&Newline(_,_));
+        let is_newline : fn(&ElmToken) -> bool = is_match!(&Newline(_,_));
         let remove_dup_newlines : CoalSig<ElmToken> = |prev,cur| {
             match (prev,cur) {
                 (Newline(_,_), latest@Newline(_,_)) => Ok(latest),
@@ -245,10 +246,6 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageTopDeclrs> {
             },
         }
     }
-}
-
-impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageEof> {
-    fn next_step(self) -> StreamParser<I,StageEof> { self }
 }
 
 #[derive(PartialEq, Copy, Clone)] enum IndentEntry {
@@ -450,8 +447,8 @@ trait TokenIterator: Iterator<Item=ElmToken> {
 }
 impl<T: Iterator<Item=ElmToken>> TokenIterator for T {}
 
-fn into_tree(full_parse: StageEof) -> tree::ElmModule {
-    let StageEof {module_declr, module_doc, module_imports, top_levels} = full_parse;
+fn into_tree(parser: StageEof) -> tree::ElmModule {
+    let StageEof{module_declr,module_doc,module_imports,top_levels}=parser;
     let tree::ModuleDeclr {name, exports} = module_declr;
     let doc = module_doc;
     let imports = module_imports;
@@ -470,91 +467,187 @@ fn into_tree(full_parse: StageEof) -> tree::ElmModule {
     }
 }
 
-#[allow(dead_code)]
 enum ParserState<I:Iterator<Item=ElmToken>> {
     StageModuleDeclr(StreamParser<I,StageModuleDeclr>),
     StageModuleDoc(StreamParser<I,StageModuleDoc>),
     StageImports(StreamParser<I,StageImports>),
     StageTopDeclrs(StreamParser<I,StageTopDeclrs>),
-    StageEof(StreamParser<I,StageEof>),
     StageFullyParsed(tree::ElmModule),
+    Nothing,
 }
 
+enum ParserStage {
+    ModuleDoc,
+    Imports,
+    TopDeclrs,
+    FullyParsed,
+}
+
+/// A lazy parser.
+///
+/// It only consumes the characters needed to return the values requested
+/// by the methods called on it.
+///
+/// The `get_*` functions take a mutable borrow because it may need to
+/// mutate in place the parser in order to evaluate (and remember) a
+/// part of the parse tree.
+///
+/// Inside notes: the Iterator is lexed and parsed progressively, as
+/// needed.
 pub struct Parser<I:Iterator<Item=char>>(ParserState<Lexer<I>>);
 
 impl<I> Parser<I>
     where I:Iterator<Item=char>
 {
+    /// Create a lazily evaluating parser.
     pub fn new(input: I) -> Parser<I> {
-        use self::ParserState as PS;
-        let complete_parser = input
-            .lex()
-            .into_parsed()
-            .next_step()
-            .next_step()
-            .next_step()
-            .next_step();
-        let full_tree = into_tree(complete_parser.stage);
-        Parser(PS::StageFullyParsed(full_tree))
+        Parser(ParserState::StageModuleDeclr(input.lex().into_parsed()))
     }
 
-    pub fn get_module_exports<'a>(&'a self) -> &'a tree::ExportList {
+    /// Parse the file up to the given stage.
+    fn evaluate_up_to(&mut self, stage: ParserStage) {
         use self::ParserState as PS;
-        match self.0 {
-            PS::StageFullyParsed(ref complete_parse_tree) => {
-                &complete_parse_tree.exports
+        use self::ParserStage as PT;
+        let old_stage = replace(&mut self.0, PS::Nothing);
+        match (stage, old_stage) {
+            (PT::ModuleDoc, PS::StageModuleDeclr(parser)) =>{
+                self.0 = PS::StageModuleDoc(parser.next_step());
             },
-            _ => panic!("not yet implemented, silly boy"),
+            (PT::ModuleDoc, anyelse) =>{ self.0 = anyelse; },
+
+            (PT::Imports, PS::StageModuleDeclr(parser)) =>{
+                self.0 = PS::StageImports(
+                    parser.next_step().next_step()
+                );
+            },
+            (PT::Imports, PS::StageModuleDoc(parser)) =>{
+                self.0 = PS::StageImports(
+                    parser.next_step()
+                );
+            },
+            (PT::Imports, anyelse) =>{ self.0 = anyelse; },
+
+            (PT::TopDeclrs, PS::StageModuleDeclr(parser)) =>{
+                self.0 = PS::StageTopDeclrs(
+                    parser.next_step().next_step().next_step()
+                );
+            },
+            (PT::TopDeclrs, PS::StageModuleDoc(parser)) =>{
+                self.0 = PS::StageTopDeclrs(
+                    parser.next_step().next_step()
+                );
+            },
+            (PT::TopDeclrs, PS::StageImports(parser)) =>{
+                self.0 = PS::StageTopDeclrs(
+                    parser.next_step()
+                );
+            },
+            (PT::TopDeclrs, anyelse) =>{ self.0 = anyelse; },
+
+            (PT::FullyParsed, PS::StageModuleDeclr(parser)) =>{
+                self.0 = PS::StageFullyParsed(into_tree(
+                    parser.next_step().next_step().next_step().next_step().stage
+                ));
+            },
+            (PT::FullyParsed, PS::StageModuleDoc(parser)) =>{
+                self.0 = PS::StageFullyParsed(into_tree(
+                    parser.next_step().next_step().next_step().stage
+                ));
+            },
+            (PT::FullyParsed, PS::StageImports(parser)) =>{
+                self.0 = PS::StageFullyParsed(into_tree(
+                    parser.next_step().next_step().stage
+                ));
+            },
+            (PT::FullyParsed, PS::StageTopDeclrs(parser)) =>{
+                self.0 = PS::StageFullyParsed(into_tree(
+                    parser.next_step().stage
+                ));
+            },
+            (PT::FullyParsed, anyelse) =>{ self.0 = anyelse; },
         }
     }
 
-    pub fn get_module_name<'a>(&'a self) -> &'a String {
+    /// Returns the export list of the module. Evaluating it if needed
+    pub fn get_module_exports<'a>(&'a mut self) -> &'a tree::ExportList {
         use self::ParserState as PS;
+        self.evaluate_up_to(ParserStage::ModuleDoc);
         match self.0 {
-            PS::StageFullyParsed(ref complete_parse_tree) => {
-                &complete_parse_tree.name
-            },
-            _ => panic!("not yet implemented, silly boy"),
+            PS::StageModuleDoc(ref parser) => &parser.stage.module_declr.exports,
+            PS::StageImports(ref parser) => &parser.stage.module_declr.exports,
+            PS::StageTopDeclrs(ref parser) => &parser.stage.module_declr.exports,
+            PS::StageFullyParsed(ref module_tree) => &module_tree.exports,
+            _ => unreachable!()
         }
     }
 
-    pub fn get_module_doc<'a>(&'a self) -> &'a Option<String> {
+    /// Returns the name of the module. Evaluating it if needed
+    pub fn get_module_name<'a>(&'a mut self) -> &'a String {
         use self::ParserState as PS;
+        self.evaluate_up_to(ParserStage::ModuleDoc);
         match self.0 {
-            PS::StageFullyParsed(ref complete_parse_tree) => {
-                &complete_parse_tree.doc
-            },
-            _ => panic!("not yet implemented, silly boy"),
+            PS::StageModuleDoc(ref parser) => &parser.stage.module_declr.name,
+            PS::StageImports(ref parser) => &parser.stage.module_declr.name,
+            PS::StageTopDeclrs(ref parser) => &parser.stage.module_declr.name,
+            PS::StageFullyParsed(ref module_tree) => &module_tree.name,
+            _ => unreachable!()
         }
     }
 
-    pub fn get_imports<'a>(&'a self) -> &'a Vec<tree::ElmImport> {
+    /// Returns the export list of the module. Evaluating it if
+    /// needed
+    pub fn get_module_doc<'a>(&'a mut self) -> &'a Option<String> {
         use self::ParserState as PS;
+        self.evaluate_up_to(ParserStage::Imports);
         match self.0 {
-            PS::StageFullyParsed(ref complete_parse_tree) => {
-                &complete_parse_tree.imports
-            },
-            _ => panic!("not yet implemented, silly boy"),
+            PS::StageImports(ref parser) => &parser.stage.module_doc,
+            PS::StageTopDeclrs(ref parser) => &parser.stage.module_doc,
+            PS::StageFullyParsed(ref module_tree) => &module_tree.doc,
+            _ => unreachable!()
         }
     }
 
-    pub fn get_types<'a>(&'a self) -> &'a Vec<tree::TypeDeclaration> {
+    /// Returns the list of import declarations. Evaluating it if needed
+    pub fn get_imports<'a>(&'a mut self) -> &'a [tree::ElmImport] {
         use self::ParserState as PS;
+        self.evaluate_up_to(ParserStage::TopDeclrs);
         match self.0 {
-            PS::StageFullyParsed(ref complete_parse_tree) => {
-                &complete_parse_tree.types
-            },
-            _ => panic!("not yet implemented, silly boy"),
+            PS::StageTopDeclrs(ref parser) => &parser.stage.module_imports,
+            PS::StageFullyParsed(ref module_tree) => &module_tree.imports,
+            _ => unreachable!()
         }
     }
 
-    pub fn into_parse_tree(self) -> tree::ElmModule {
+    /// Returns the list of function declarations. The
+    /// whole file is parsed in order to to generate that list
+    pub fn get_functions<'a>(&'a mut self) -> &'a [tree::FunctionDeclaration] {
         use self::ParserState as PS;
+        self.evaluate_up_to(ParserStage::FullyParsed);
         match self.0 {
-            PS::StageFullyParsed(complete_parse_tree) => {
-                complete_parse_tree
-            },
-            _ => panic!("not yet implemented, silly boy"),
+            PS::StageFullyParsed(ref module_tree) => &module_tree.functions,
+            _ => unreachable!()
+        }
+    }
+
+    /// Returns the list of type declarations. The
+    /// whole file is parsed in order to to generate that list
+    pub fn get_types<'a>(&'a mut self) -> &'a [tree::TypeDeclaration] {
+        use self::ParserState as PS;
+        self.evaluate_up_to(ParserStage::FullyParsed);
+        match self.0 {
+            PS::StageFullyParsed(ref module_tree) => &module_tree.types,
+            _ => unreachable!()
+        }
+    }
+
+    /// Parse the whole file and return the complete parse tree.
+    pub fn into_parse_tree(mut self) -> tree::ElmModule {
+        use self::ParserState as PS;
+
+        self.evaluate_up_to(ParserStage::FullyParsed);
+        match self.0 {
+            PS::StageFullyParsed(module_tree) => module_tree,
+            _ => unreachable!()
         }
     }
 }

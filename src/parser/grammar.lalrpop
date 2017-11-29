@@ -404,7 +404,7 @@ extern {
         "else" => tokens::ElmToken::Else,
         "|" => tokens::ElmToken::Pipe,
         "=" => tokens::ElmToken::Assign,
-        ":" => tokens::ElmToken::TypeDeclr,
+        ":" => tokens::ElmToken::Colon,
         "type" => tokens::ElmToken::Type,
         "alias" => tokens::ElmToken::Alias,
         "infixr" => tokens::ElmToken::Infixr,

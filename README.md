@@ -11,7 +11,7 @@ programming language](http://elm-lang.org).
 * A lexer capable of tokenizing all elm constructs from a character iterator.
 
 * A parser capable of parsing the entirety of the elm grammar, at the exception
-	of a couple edge cases evocated in the [limitations](#Limitations) section.
+  of a couple edge cases evocated in the [limitations](#Limitations) section.
 
 
 ## Implementation
@@ -35,17 +35,18 @@ parse any expression.
 ## Planned (maybe?)
 
 * An efficient parser capable of building an elm AST lazily. (Currently, it
-	just parses everything upfront)
+  parses everything if anything else than the imports, exports and module
+  docs are needed)
 
 * Proper line location tracking, so you can retreive the location of the
-	definition of some functions.
+  definition of some functions.
 
 * A clean API to just retreive interesting stuff from the code (types, doc
-	strings, exported symbols etc)
+  strings, exported symbols etc)
 
 * Other crates would implement the actual user-facing part of dev tools. One
-	can imagine a completion manager with caching, or a dependency graph
-	generator etc.
+  can imagine a completion manager with caching, or a dependency graph
+  generator etc.
 
 * Proper error handling :)
 
@@ -56,49 +57,44 @@ parse any expression.
 ## Limitations
 
 * Aligned indentation after `let` keyword **do not work**. If you are thourugh
-	about using elm-format, this shouldn't be an issue.
-	\
-	example:
-	\
-	```elm
-	-- Does not work (should work)
-	f x = let y = x * 3
-	          z = x + 92
-				in x + y + z
-	-- Works (should)
-	f x =
-	  let
-		  y = x * 3
-			z = x + 92
-		in
-		  x + y + z
-	-- Works (should)
-	f x = let y = 10 in y * x
-	```
-	\
-	This is also true for `case` pattern branches.
+  about using elm-format, this shouldn't be an issue.  example:
+
+```elm
+-- Does not work (should work)
+f x = let y = x * 3
+          z = x + 92
+      in x + y + z
+-- Works (should)
+f x =
+  let
+      y = x * 3
+      z = x + 92
+	in
+      x + y + z
+-- Works (should)
+f x = let y = 10 in y * x
+```
+
+* This is also true for `case` pattern branches.
 
 * Prefix `-`. The weird semantic makes it hard to integrate in a lexer:
-	* If preceeding without whitespace a word or opening parenthesis, and there
-		is no words preceeding the `-` without whitespace, it is a prefix `-`.
-	* Otherwise it is the `-` operator.
+  * If preceeding without whitespace a word or opening parenthesis, and there
+    is no words preceeding the `-` without whitespace, it is a prefix `-`.
+  * Otherwise it is the `-` operator.
 
 * Shader literals and multiline string literals are not yet handled properly.
 
 * I handle indentation in a different maner than the official elm-compiler
-	parser: instead of checking alignement within the parser, I execute a
-	"preparse" phase in which I insert closing delimiters **only when case
-	branches can be ambiguous** (nested `case`).
-	\
-	I have concidered encoding into the type of the expression the level of
-	indentation using Peano numbers, but I found this was a bit too *fancy*. If
-	anyone has the guts to do that and show me code readability and performance
-	improvements, I'm all hear.
-	\
-	The upside is that the semantics should wind up being the same as keeping
-	track of the indentation level. However, we may have a slower parser as a
-	result.
-
+  parser: instead of checking alignement within the parser, I execute a
+  "preparse" phase in which I insert closing delimiters **only when case
+  branches can be ambiguous** (nested `case`).
+  I have concidered encoding into the type of the expression the level of
+  indentation using Peano numbers, but I found this was a bit too *fancy*. If
+  anyone has the guts to do that and show me code readability and performance
+  improvements, I'm all hear.
+  The upside is that the semantics should wind up being the same as keeping
+  track of the indentation level. However, we may have a slower parser as a
+  result.
 
 ## License(s)
 

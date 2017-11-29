@@ -78,7 +78,7 @@ pub enum ElmToken {
     /// the equal sign :D
     Assign,
     /// the `:` colon
-    TypeDeclr,
+    Colon,
     /// the `type` keyword.
     Type,
     /// the `alias` keyword.
@@ -149,7 +149,7 @@ impl fmt::Display for ElmToken {
             Else => write!(f, "else"),
             Pipe => write!(f, "|"),
             Assign => write!(f, "="),
-            TypeDeclr => write!(f, ":"),
+            Colon => write!(f, ":"),
             Type => write!(f, "type"),
             Alias => write!(f, "alias"),
             Infixr => write!(f, "infixr"),
@@ -198,7 +198,7 @@ impl fmt::Debug for ElmToken {
             Else => write!(f, "<else>"),
             Pipe => write!(f, "<|>"),
             Assign => write!(f, "<=>"),
-            TypeDeclr => write!(f, "<:>"),
+            Colon => write!(f, "<:>"),
             Type => write!(f, "<type>"),
             Alias => write!(f, "<alias>"),
             Infixr => write!(f, "<infixr>"),
