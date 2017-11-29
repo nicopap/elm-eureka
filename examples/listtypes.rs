@@ -81,7 +81,7 @@ pub fn main() {
     let char_stream = BufReader::new(file).chars().map(|x|x.unwrap());
     let mut parser = Parser::new(char_stream);
     for &tree::TypeDeclaration { ref name, ref genre, .. }
-    in parser.get_types() {
+    in parser.types() {
         match *genre {
             tree::TypeGenre::Alias(ref type_) => {
                 println!("type alias {}, is:\n  {}", name, type_.describe());

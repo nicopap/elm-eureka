@@ -5,6 +5,9 @@ keywords = ["parser","elm","programming language"]
 version = "0.1.0"
 authors = ["Nicola Papale"]
 build = "build.rs"
+repository = "https://github.com/nicopap/elm-eureka"
+readme = "README.md"
+categories = ["parser-implementations", "text-processing"]
 license = "LGPL3"
 
 [build-dependencies.lalrpop]

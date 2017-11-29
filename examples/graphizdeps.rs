@@ -26,7 +26,7 @@ pub fn main() {
         let mut parser = Parser::new(char_stream);
         println!("\t{}[label=\"{}\"];", small_name, module_name);
 
-        for import in parser.get_imports() {
+        for import in parser.imports() {
             let import_name : &String = &import.global_name;
             if !sources.source_files.contains_key(import_name) {continue;}
             let small_import_name = keywordify(import_name.clone());

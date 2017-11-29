@@ -17,6 +17,6 @@ pub fn main() {
     let file = File::open(file_to_read).unwrap();
     let reader = BufReader::new(file);
     let char_stream = reader.chars().map(|x| x.unwrap());
-    let parser = Parser::new(char_stream);
-    println!("{:#?}", parser);
+    let parse_tree = Parser::new(char_stream).into_parse_tree();
+    println!("{:#?}", parse_tree);
 }

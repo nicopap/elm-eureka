@@ -488,7 +488,7 @@ enum ParserStage {
 /// It only consumes the characters needed to return the values requested
 /// by the methods called on it.
 ///
-/// The `get_*` functions take a mutable borrow because it may need to
+/// The getter functions take a mutable borrow because it may need to
 /// mutate in place the parser in order to evaluate (and remember) a
 /// part of the parse tree.
 ///
@@ -569,7 +569,7 @@ impl<I> Parser<I>
     }
 
     /// Returns the export list of the module. Evaluating it if needed
-    pub fn get_module_exports<'a>(&'a mut self) -> &'a tree::ExportList {
+    pub fn module_exports<'a>(&'a mut self) -> &'a tree::ExportList {
         use self::ParserState as PS;
         self.evaluate_up_to(ParserStage::ModuleDoc);
         match self.0 {
@@ -582,7 +582,7 @@ impl<I> Parser<I>
     }
 
     /// Returns the name of the module. Evaluating it if needed
-    pub fn get_module_name<'a>(&'a mut self) -> &'a String {
+    pub fn module_name<'a>(&'a mut self) -> &'a String {
         use self::ParserState as PS;
         self.evaluate_up_to(ParserStage::ModuleDoc);
         match self.0 {
@@ -596,7 +596,7 @@ impl<I> Parser<I>
 
     /// Returns the export list of the module. Evaluating it if
     /// needed
-    pub fn get_module_doc<'a>(&'a mut self) -> &'a Option<String> {
+    pub fn module_doc<'a>(&'a mut self) -> &'a Option<String> {
         use self::ParserState as PS;
         self.evaluate_up_to(ParserStage::Imports);
         match self.0 {
@@ -608,7 +608,7 @@ impl<I> Parser<I>
     }
 
     /// Returns the list of import declarations. Evaluating it if needed
-    pub fn get_imports<'a>(&'a mut self) -> &'a [tree::ElmImport] {
+    pub fn imports<'a>(&'a mut self) -> &'a [tree::ElmImport] {
         use self::ParserState as PS;
         self.evaluate_up_to(ParserStage::TopDeclrs);
         match self.0 {
@@ -620,7 +620,7 @@ impl<I> Parser<I>
 
     /// Returns the list of function declarations. The
     /// whole file is parsed in order to to generate that list
-    pub fn get_functions<'a>(&'a mut self) -> &'a [tree::FunctionDeclaration] {
+    pub fn functions<'a>(&'a mut self) -> &'a [tree::FunctionDeclaration] {
         use self::ParserState as PS;
         self.evaluate_up_to(ParserStage::FullyParsed);
         match self.0 {
@@ -631,7 +631,7 @@ impl<I> Parser<I>
 
     /// Returns the list of type declarations. The
     /// whole file is parsed in order to to generate that list
-    pub fn get_types<'a>(&'a mut self) -> &'a [tree::TypeDeclaration] {
+    pub fn types<'a>(&'a mut self) -> &'a [tree::TypeDeclaration] {
         use self::ParserState as PS;
         self.evaluate_up_to(ParserStage::FullyParsed);
         match self.0 {
@@ -652,14 +652,3 @@ impl<I> Parser<I>
     }
 }
 
-impl<I:Iterator<Item=char>> fmt::Debug for Parser<I> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::ParserState as PS;
-        match self.0 {
-            PS::StageFullyParsed(ref complete_parse_tree) => {
-                write!(f, "{:#1?}", complete_parse_tree)
-            },
-            _ => panic!("not yet implemented, silly boy"),
-        }
-    }
-}

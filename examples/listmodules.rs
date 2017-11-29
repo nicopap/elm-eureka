@@ -33,10 +33,10 @@ fn parse_and_feedback(
         let file = File::open(source_path).unwrap();
         let char_stream = BufReader::new(file).chars().map(|x| x.unwrap());
         let mut parser = Parser::new(char_stream);
-        let exports = parser.get_module_exports().clone();
-        let imports = parser.get_imports().to_vec();
-        let name = parser.get_module_name().clone();
-        let doc = parser.get_module_doc().clone();
+        let exports = parser.module_exports().clone();
+        let imports = parser.imports().to_vec();
+        let name = parser.module_name().clone();
+        let doc = parser.module_doc().clone();
         send.send(Some((module_name, name,doc,exports,imports))).unwrap();
     }
     send.send(None).unwrap();
