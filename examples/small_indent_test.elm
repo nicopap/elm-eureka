@@ -145,11 +145,12 @@ ident_3 ptrn_12 ptrn_13 ptrn_14 =
         expr_60
 
 
--- The preparser should have been inserting the `indent` token *before*
--- The `endcase` tokens, while it was inserting it that the former-last
--- place.
--- The parser didn't handle correctly more than two levels of open case
--- closing when aligning to a lower level case
+{-| The preparser should have been inserting the `indent` token *before*
+The `endcase` tokens, while it was inserting it that the former-last
+place.
+The parser didn't handle correctly more than two levels of open case
+closing when aligning to a lower level case
+-}
 ident_4 ident_5 =
     case expr_67 (expr_68 " ") of
         Ptrn_15 expr_69 ->

@@ -4,17 +4,18 @@
 
 extern crate elm_eureka;
 
-use std::path::Path;
 use std::io::prelude::*;
 use std::io::BufReader;
 use std::fs::File;
+use std::env::args;
 
 use elm_eureka::Parser;
 use elm_eureka::packages_reader;
 
 pub fn main() {
-    let packagepath = Path::new("examples/elm-spa-example");
-    let sources = packages_reader::info(packagepath).unwrap();
+    let packagepath =
+        args().nth(1).unwrap_or(String::from("examples/elm-spa-example"));
+    let sources = packages_reader::info(packagepath.as_ref()).unwrap();
     let keywordify = | name:String | name.replace(".","_").to_lowercase();
 
     println!("digraph dependencies {{");

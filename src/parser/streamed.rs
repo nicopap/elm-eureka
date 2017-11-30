@@ -468,11 +468,11 @@ fn into_tree(parser: StageEof) -> tree::ElmModule {
 }
 
 enum ParserState<I:Iterator<Item=ElmToken>> {
-    StageModuleDeclr(StreamParser<I,StageModuleDeclr>),
-    StageModuleDoc(StreamParser<I,StageModuleDoc>),
-    StageImports(StreamParser<I,StageImports>),
-    StageTopDeclrs(StreamParser<I,StageTopDeclrs>),
-    StageFullyParsed(tree::ElmModule),
+    ModuleDeclr(StreamParser<I,StageModuleDeclr>),
+    ModuleDoc(StreamParser<I,StageModuleDoc>),
+    Imports(StreamParser<I,StageImports>),
+    TopDeclrs(StreamParser<I,StageTopDeclrs>),
+    FullyParsed(tree::ElmModule),
     Nothing,
 }
 
@@ -500,71 +500,138 @@ impl<I> Parser<I>
     where I:Iterator<Item=char>
 {
     /// Create a lazily evaluating parser.
+    ///
+    /// # Example
+    /// ```rust
+    /// # #[allow(unused_variables)]
+    /// # use elm_eureka::Parser;
+    /// let elm_source = r#"module A exposing (f,X)
+    /// {-| Module doc -}
+    /// import A.B.C as C
+    ///
+    /// f : Int -> { f1: Int, f2: List Float }
+    /// f x = C.m <| x
+    ///
+    /// type alias X a b c = a -> b -> c
+    /// "#;
+    /// let mut parser = Parser::new(elm_source.chars());
+    /// let parse_tree = parser.into_parse_tree();
+    /// ```
     pub fn new(input: I) -> Parser<I> {
-        Parser(ParserState::StageModuleDeclr(input.lex().into_parsed()))
+        Parser(ParserState::ModuleDeclr(input.lex().into_parsed()))
     }
 
     /// Parse the file up to the given stage.
     fn evaluate_up_to(&mut self, stage: ParserStage) {
-        use self::ParserState as PS;
-        use self::ParserStage as PT;
-        let old_stage = replace(&mut self.0, PS::Nothing);
+        use self::ParserState as ST;
+        use self::ParserStage as SG;
+        let old_stage = replace(&mut self.0, ST::Nothing);
         match (stage, old_stage) {
-            (PT::ModuleDoc, PS::StageModuleDeclr(parser)) =>{
-                self.0 = PS::StageModuleDoc(parser.next_step());
+            (SG::ModuleDoc, ST::ModuleDeclr(parser)) =>{
+                self.0 = ST::ModuleDoc(parser.next_step());
             },
-            (PT::ModuleDoc, anyelse) =>{ self.0 = anyelse; },
+            (SG::ModuleDoc, anyelse) =>{ self.0 = anyelse; },
 
-            (PT::Imports, PS::StageModuleDeclr(parser)) =>{
-                self.0 = PS::StageImports(
+            (SG::Imports, ST::ModuleDeclr(parser)) =>{
+                self.0 = ST::Imports(
                     parser.next_step().next_step()
                 );
             },
-            (PT::Imports, PS::StageModuleDoc(parser)) =>{
-                self.0 = PS::StageImports(
+            (SG::Imports, ST::ModuleDoc(parser)) =>{
+                self.0 = ST::Imports(
                     parser.next_step()
                 );
             },
-            (PT::Imports, anyelse) =>{ self.0 = anyelse; },
+            (SG::Imports, anyelse) =>{ self.0 = anyelse; },
 
-            (PT::TopDeclrs, PS::StageModuleDeclr(parser)) =>{
-                self.0 = PS::StageTopDeclrs(
+            (SG::TopDeclrs, ST::ModuleDeclr(parser)) =>{
+                self.0 = ST::TopDeclrs(
                     parser.next_step().next_step().next_step()
                 );
             },
-            (PT::TopDeclrs, PS::StageModuleDoc(parser)) =>{
-                self.0 = PS::StageTopDeclrs(
+            (SG::TopDeclrs, ST::ModuleDoc(parser)) =>{
+                self.0 = ST::TopDeclrs(
                     parser.next_step().next_step()
                 );
             },
-            (PT::TopDeclrs, PS::StageImports(parser)) =>{
-                self.0 = PS::StageTopDeclrs(
+            (SG::TopDeclrs, ST::Imports(parser)) =>{
+                self.0 = ST::TopDeclrs(
                     parser.next_step()
                 );
             },
-            (PT::TopDeclrs, anyelse) =>{ self.0 = anyelse; },
+            (SG::TopDeclrs, anyelse) =>{ self.0 = anyelse; },
 
-            (PT::FullyParsed, PS::StageModuleDeclr(parser)) =>{
-                self.0 = PS::StageFullyParsed(into_tree(
+            (SG::FullyParsed, ST::ModuleDeclr(parser)) =>{
+                self.0 = ST::FullyParsed(into_tree(
                     parser.next_step().next_step().next_step().next_step().stage
                 ));
             },
-            (PT::FullyParsed, PS::StageModuleDoc(parser)) =>{
-                self.0 = PS::StageFullyParsed(into_tree(
+            (SG::FullyParsed, ST::ModuleDoc(parser)) =>{
+                self.0 = ST::FullyParsed(into_tree(
                     parser.next_step().next_step().next_step().stage
                 ));
             },
-            (PT::FullyParsed, PS::StageImports(parser)) =>{
-                self.0 = PS::StageFullyParsed(into_tree(
+            (SG::FullyParsed, ST::Imports(parser)) =>{
+                self.0 = ST::FullyParsed(into_tree(
                     parser.next_step().next_step().stage
                 ));
             },
-            (PT::FullyParsed, PS::StageTopDeclrs(parser)) =>{
-                self.0 = PS::StageFullyParsed(into_tree(
+            (SG::FullyParsed, ST::TopDeclrs(parser)) =>{
+                self.0 = ST::FullyParsed(into_tree(
                     parser.next_step().stage
                 ));
             },
-            (PT::FullyParsed, anyelse) =>{ self.0 = anyelse; },
+            (SG::FullyParsed, anyelse) =>{ self.0 = anyelse; },
+        }
+    }
+
+    /// Returns the names that the module exposes. Evaluating it if needed
+    /// NB: Currently returns an empty list if the export is unqualified,
+    /// this is also true for type constructors.
+    ///
+    /// # Example
+    /// ```rust
+    /// # #[allow(unused_variables)]
+    /// # use elm_eureka::Parser;
+    /// let elm_source = r#"module A exposing (f,X)
+    /// {-| Module doc -}
+    /// import A.B.C as C
+    ///
+    /// f : Int -> { f1: Int, f2: List Float }
+    /// f x = C.m <| x
+    ///
+    /// type alias X a b c = a -> b -> c
+    /// "#;
+    ///
+    /// let mut parser = Parser::new(elm_source.chars());
+    /// let symbols = parser.exposed_symbols();
+    /// assert_eq!(symbols, vec!["f", "X"]);
+    /// ```
+    pub fn exposed_symbols<'a>(&'a mut self) -> Vec<&'a str> {
+        use self::ParserState as PS;
+        use self::tree::ExportEntry as EE;
+        self.evaluate_up_to(ParserStage::ModuleDoc);
+        let exports =
+            match self.0 {
+                PS::ModuleDoc(ref parser) => &parser.stage.module_declr.exports,
+                PS::Imports(ref parser) => &parser.stage.module_declr.exports,
+                PS::TopDeclrs(ref parser) => &parser.stage.module_declr.exports,
+                PS::FullyParsed(ref module_tree) => &module_tree.exports,
+                _ => unreachable!()
+            };
+        match *exports {
+            tree::ExportList::Unqualified => vec![],
+            tree::ExportList::List(ref entries) => {
+                entries
+                    .iter()
+                    .map(|entry| match *entry {
+                        EE::Name(ref name) => name.as_ref(),
+                        EE::Operator(ref op) => op.as_ref(),
+                        EE::WithConstructors(ref name,_) => name.as_ref(),
+                        EE::WithAllConstructors(ref name) => name.as_ref(),
+                    })
+                    .collect::<Vec<&'a str>>()
+            },
         }
     }
 
@@ -573,36 +640,75 @@ impl<I> Parser<I>
         use self::ParserState as PS;
         self.evaluate_up_to(ParserStage::ModuleDoc);
         match self.0 {
-            PS::StageModuleDoc(ref parser) => &parser.stage.module_declr.exports,
-            PS::StageImports(ref parser) => &parser.stage.module_declr.exports,
-            PS::StageTopDeclrs(ref parser) => &parser.stage.module_declr.exports,
-            PS::StageFullyParsed(ref module_tree) => &module_tree.exports,
+            PS::ModuleDoc(ref parser) => &parser.stage.module_declr.exports,
+            PS::Imports(ref parser) => &parser.stage.module_declr.exports,
+            PS::TopDeclrs(ref parser) => &parser.stage.module_declr.exports,
+            PS::FullyParsed(ref module_tree) => &module_tree.exports,
             _ => unreachable!()
         }
     }
 
     /// Returns the name of the module. Evaluating it if needed
+    ///
+    /// # Example
+    /// ```rust
+    /// # #[allow(unused_variables)]
+    /// # use elm_eureka::Parser;
+    /// let elm_source = r#"module My.Great.Module exposing (f,X)
+    /// {-| Module doc -}
+    /// import A.B.C as C
+    ///
+    /// f : Int -> { f1: Int, f2: List Float }
+    /// f x = C.m <| x
+    ///
+    /// type alias X a b c = a -> b -> c
+    /// "#;
+    ///
+    /// let mut parser = Parser::new(elm_source.chars());
+    /// let name = parser.module_name();
+    /// assert_eq!(name, &String::from("My.Great.Module"));
+    /// ```
     pub fn module_name<'a>(&'a mut self) -> &'a String {
         use self::ParserState as PS;
         self.evaluate_up_to(ParserStage::ModuleDoc);
         match self.0 {
-            PS::StageModuleDoc(ref parser) => &parser.stage.module_declr.name,
-            PS::StageImports(ref parser) => &parser.stage.module_declr.name,
-            PS::StageTopDeclrs(ref parser) => &parser.stage.module_declr.name,
-            PS::StageFullyParsed(ref module_tree) => &module_tree.name,
+            PS::ModuleDoc(ref parser) => &parser.stage.module_declr.name,
+            PS::Imports(ref parser) => &parser.stage.module_declr.name,
+            PS::TopDeclrs(ref parser) => &parser.stage.module_declr.name,
+            PS::FullyParsed(ref module_tree) => &module_tree.name,
             _ => unreachable!()
         }
     }
 
     /// Returns the export list of the module. Evaluating it if
     /// needed
+    ///
+    /// # Example
+    /// ```rust
+    /// # #[allow(unused_variables)]
+    /// # use elm_eureka::Parser;
+    /// let elm_source = r#"module My.Great.Module exposing (f,X)
+    /// {-| Some useful informations
+    /// -}
+    /// import A.B.C as C
+    ///
+    /// f : Int -> { f1: Int, f2: List Float }
+    /// f x = C.m <| x
+    ///
+    /// type alias X a b c = a -> b -> c
+    /// "#;
+    ///
+    /// let mut parser = Parser::new(elm_source.chars());
+    /// let docs = parser.module_doc();
+    /// assert_eq!(docs, &Some(String::from(" Some useful informations\n")));
+    /// ```
     pub fn module_doc<'a>(&'a mut self) -> &'a Option<String> {
         use self::ParserState as PS;
         self.evaluate_up_to(ParserStage::Imports);
         match self.0 {
-            PS::StageImports(ref parser) => &parser.stage.module_doc,
-            PS::StageTopDeclrs(ref parser) => &parser.stage.module_doc,
-            PS::StageFullyParsed(ref module_tree) => &module_tree.doc,
+            PS::Imports(ref parser) => &parser.stage.module_doc,
+            PS::TopDeclrs(ref parser) => &parser.stage.module_doc,
+            PS::FullyParsed(ref module_tree) => &module_tree.doc,
             _ => unreachable!()
         }
     }
@@ -612,8 +718,8 @@ impl<I> Parser<I>
         use self::ParserState as PS;
         self.evaluate_up_to(ParserStage::TopDeclrs);
         match self.0 {
-            PS::StageTopDeclrs(ref parser) => &parser.stage.module_imports,
-            PS::StageFullyParsed(ref module_tree) => &module_tree.imports,
+            PS::TopDeclrs(ref parser) => &parser.stage.module_imports,
+            PS::FullyParsed(ref module_tree) => &module_tree.imports,
             _ => unreachable!()
         }
     }
@@ -624,7 +730,7 @@ impl<I> Parser<I>
         use self::ParserState as PS;
         self.evaluate_up_to(ParserStage::FullyParsed);
         match self.0 {
-            PS::StageFullyParsed(ref module_tree) => &module_tree.functions,
+            PS::FullyParsed(ref module_tree) => &module_tree.functions,
             _ => unreachable!()
         }
     }
@@ -635,7 +741,7 @@ impl<I> Parser<I>
         use self::ParserState as PS;
         self.evaluate_up_to(ParserStage::FullyParsed);
         match self.0 {
-            PS::StageFullyParsed(ref module_tree) => &module_tree.types,
+            PS::FullyParsed(ref module_tree) => &module_tree.types,
             _ => unreachable!()
         }
     }
@@ -646,7 +752,7 @@ impl<I> Parser<I>
 
         self.evaluate_up_to(ParserStage::FullyParsed);
         match self.0 {
-            PS::StageFullyParsed(module_tree) => module_tree,
+            PS::FullyParsed(module_tree) => module_tree,
             _ => unreachable!()
         }
     }
