@@ -105,8 +105,7 @@ extern crate either;
 
 pub mod packages_reader;
 mod tokens;
-mod lexer;
+pub mod lexer;
 pub mod parser;
 pub use tokens::ElmToken;
-pub use lexer::LexableIterator;
 pub use parser::Parser;

@@ -11,27 +11,18 @@
 //! into a string literal token)
 //!
 //! Indentation at newline is kept track of with the
-//! Newline token. It should eventually contain the
-//! line number. Currently, the line field is always
-//! 1, the column field is set correctly.
+//! Newline token.
 //!
-//! In term of efficiency: this is a bit difficult to
-//! parallelize (ie: divide the file in N bits to tokenize
-//! and then concatenate the result) because of block
-//! comments and string literals. Otherwise the lexer
-//! is position independent.
+//! Shortly on the roadmap is a better API for location
+//! tracking.
 //!
-//! Shortly on the roadmap is correct line counting.
-//!
-//! Note that the shortcomming of this library, while
+//! Note that the shortcomming of this module, while
 //! it would be terrible for a compiler, are not too
 //! problematic: we mostly intend to parse *valid* elm
-//! code, so this is an expectation we kinda can deal
-//! with.
-//! Plus, we can parallelize by lexing multiple files
-//! at the same time. Since we already lex a 5K file
-//! in about 10ms, I don't think the lattency here
-//! is much of a problem.
+//! code.
+//!
+//! I plan to fix up the panics issue and have proper
+//! error handling, but may take a while before I do that.
 
 use std::iter::Peekable;
 use tokens::ElmToken;
@@ -168,9 +159,6 @@ fn consume_line_comment<I>(input: &mut Peekable<I>)
 /// string if the comment was a doc comment.
 ///
 /// returns`(Some(DocCommentToken), #linesConsumed)`
-///
-/// # Panics
-/// If the input is less than 2 characters long
 fn consume_block_comment<I>(input: &mut Peekable<I>)
     -> (Option<ElmToken>, i16)
     where I: Iterator<Item=char>
@@ -354,7 +342,7 @@ pub struct Lexer<I: Iterator<Item=char>> {
 /// # Examples
 ///
 /// ```rust
-/// use elm_eureka::LexableIterator;
+/// use elm_eureka::lexer::LexableIterator;
 /// let elm_source = "f x = λy -> x ** y";
 /// let lexer = elm_source.chars().lex();
 /// ```
@@ -382,11 +370,9 @@ impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
     /// * Somehow, the lexer tried to turn into a
     ///   token something that it shouldn't
     ///
-    /// * There is a block comment that never closes
-    ///
     /// # Examples
     /// ```rust
-    /// use elm_eureka::LexableIterator;
+    /// use elm_eureka::lexer::LexableIterator;
     /// use elm_eureka::ElmToken;
     /// use elm_eureka::ElmToken::{Name,Lambda,Assign,Operator,RArrow,StringLit,Number,Newline};
     /// let elm_source = "f x = λy -> x ** y

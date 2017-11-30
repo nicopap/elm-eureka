@@ -11,7 +11,7 @@ programming language](http://elm-lang.org).
 * A lexer capable of tokenizing all elm constructs from a character iterator.
 
 * A parser capable of parsing the entirety of the elm grammar, at the exception
-  of a couple edge cases evocated in the [limitations](#Limitations) section.
+  of a couple edge cases evocated in the [limitations](#limitations) section.
 
 
 ## Implementation
@@ -51,8 +51,6 @@ parse any expression.
 * Proper error handling :)
 
 * Proper handling of shader and multiline string literals.
-
-* Reorganize the crate, separate parse-tree from ast etc.
 
 ## Limitations
 
