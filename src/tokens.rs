@@ -183,7 +183,7 @@ impl fmt::Debug for ElmToken {
             Exposing => write!(f, "<exposing>"),
             Import => write!(f, "<import>"),
             As => write!(f, "<as>"),
-            DocComment(_) => write!(f, "<{{-| ... -}}>"),
+            DocComment(ref content) => write!(f, "<{{-|{}-}}>", content),
             LBrace => write!(f, "<{{>"),
             RBrace => write!(f, "<}}>"),
             LBracket => write!(f, "<[>"),
