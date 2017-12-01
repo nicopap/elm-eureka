@@ -4,7 +4,7 @@
 
 extern crate elm_eureka;
 
-use std::path::Path;
+use std::path::{Path,PathBuf};
 use std::thread;
 use std::sync::mpsc::{Receiver,Sender,channel};
 use std::io::prelude::*;
@@ -21,7 +21,7 @@ use elm_eureka::parser::tree;
 const NTHREAD:i32=1;
 
 fn parse_and_feedback(
-    receive: Receiver<Option<(Box<Path>, String)>>,
+    receive: Receiver<Option<(PathBuf, String)>>,
     send: Sender<Option<(String,
                          String,
                          Option<String>,
@@ -51,7 +51,7 @@ pub fn main() {
             .chain(source_info.source_files.into_iter());
 
     let (send_processed, receive_processed) = channel();
-    let mut send_channels : Vec<Sender<Option<(Box<Path>, String)>>> = Vec::new();
+    let mut send_channels : Vec<Sender<Option<(PathBuf, String)>>> = Vec::new();
     for _ in 0..NTHREAD {
         let sender_copy = send_processed.clone();
         let (send_paths, receiver) = channel();
