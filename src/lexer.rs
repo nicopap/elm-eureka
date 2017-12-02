@@ -234,7 +234,7 @@ fn consume_number<I>(input: &mut Peekable<I>, into: &mut String)
 {
     let is_hexa = match input.peek() { Some(&'x') => true, _ => false };
     if is_hexa {
-        into.push(input.next().unwrap());
+        into.push(input.next().expect("Lexing an hexadecimal number"));
         consume_into(input, into, |c| c.is_digit(16))
     } else {
         let mut radix = false;

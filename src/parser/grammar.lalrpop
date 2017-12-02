@@ -61,14 +61,22 @@ pub TopDeclr: TopDeclr = {
     "infixr" <priority:NumberTok> <operator:OperatorTok> =>
         TopDeclr::OperPriority(OperPriority {
             associativity: Associativity::Right,
-            priority: u8::from_str(priority.as_str()).unwrap(),
+            priority:
+                u8::from_str(priority.as_str())
+                    .expect("Error reading priority of infix operator"),
             operator : operator,
         }),
 
     "infixl" <priority:NumberTok> <operator:OperatorTok> =>
         TopDeclr::OperPriority(OperPriority {
             associativity: Associativity::Left,
-            priority: u8::from_str(priority.as_str()).unwrap(),
+            priority:
+                // The lexer can potentially generate Number tokens that
+                // are not convertible to u8, we "guard" against that
+                // (this should be temporary untill I figure out a
+                // better error handling system).
+                u8::from_str(priority.as_str())
+                    .expect("Error reading priority of infix operator"),
             operator : operator,
         }),
 

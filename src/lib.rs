@@ -102,6 +102,7 @@
 extern crate serde_json;
 extern crate itertools;
 extern crate either;
+extern crate walkdir;
 
 pub mod packages_reader;
 mod tokens;

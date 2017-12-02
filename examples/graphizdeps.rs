@@ -19,7 +19,10 @@ pub fn main() {
     let keywordify = | name:String | name.replace(".","_").to_lowercase();
 
     println!("digraph dependencies {{");
-    for (module_name, source_path) in sources.source_files.iter() {
+    let iter_sources
+        = sources.source_files.iter()
+            .map(|(n,p)| (n,sources.project_dir.join(p)));
+    for (module_name, source_path) in iter_sources {
         let small_name = keywordify(module_name.clone());
         let file = File::open(source_path).unwrap();
         let reader = BufReader::new(file);

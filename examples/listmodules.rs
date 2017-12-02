@@ -47,11 +47,13 @@ pub fn main() {
     let source_info = packages_reader::info(packagepath).unwrap();
     let sources =
         source_info.dependencies
-            .into_iter()
-            .chain(source_info.source_files.into_iter());
+            .iter()
+            .chain(source_info.source_files.iter())
+            .map(|(n,p)| (n,source_info.project_dir.join(p)));
 
     let (send_processed, receive_processed) = channel();
-    let mut send_channels : Vec<Sender<Option<(PathBuf, String)>>> = Vec::new();
+    let mut send_channels : Vec<Sender<Option<(PathBuf, String)>>>
+        = Vec::new();
     for _ in 0..NTHREAD {
         let sender_copy = send_processed.clone();
         let (send_paths, receiver) = channel();
@@ -62,14 +64,16 @@ pub fn main() {
     for (module_name, source_path) in sources {
         send_channels
             .index_mut((i % NTHREAD) as usize)
-            .send(Some((source_path, module_name)))
+            .send(Some((source_path, module_name.clone())))
             .unwrap();
         i += 1;
     }
     for chan in send_channels {
         chan.send(None).unwrap();
     }
-    while let Some((module, name,doc,exports,imports)) = receive_processed.recv().unwrap() {
+    while let Some((module, name,doc,exports,imports))
+        = receive_processed.recv().unwrap()
+    {
         let module_doc : String =
             doc .clone()
                 .map(|x| x.chars().take_while(|&c| c != '\n').collect())
@@ -87,10 +91,7 @@ pub fn main() {
             exports: {}
             has doc: {}
             imports: {}
-            ",
-            module,
-            module_name,
-            module_exports,
+            ", module, module_name, module_exports,
             module_doc,
             module_imports
         );

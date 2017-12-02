@@ -358,6 +358,9 @@ impl<I:Iterator<Item=ElmToken>> FilterIndent<I> {
                 let mut last_indenter_is_case = false;
                 // Pop values over the indentation we found (leaving
                 // the one we found)
+                // pop_count is lower than the size of the indent_stack,
+                // so we have the guarentee that the wrapping off will
+                // not panic
                 for _ in 0..pop_count {
                     match self.indent_stack.pop().unwrap() {
                         Case(_) if last_indenter_is_case => {
