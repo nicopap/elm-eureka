@@ -216,8 +216,3 @@ impl fmt::Debug for ElmToken {
         }
     }
 }
-
-#[derive(Debug,PartialEq,Eq)]
-pub enum LexError { }
-
-

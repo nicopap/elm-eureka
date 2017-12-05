@@ -382,8 +382,8 @@ Comma<T>: Vec<T> = {
 };
 
 extern {
-    type Location = usize;
-    type Error = tokens::LexError;
+    type Location = (u16,u16);
+    type Error = ::lexer::LexError;
 
     enum tokens::ElmToken {
         NewlineTok => tokens::ElmToken::Newline(<i16>,<i16>),
@@ -426,7 +426,7 @@ extern {
         CharTok => tokens::ElmToken::Char(<String>),
         "case indent" => tokens::ElmToken::CaseIndent,
         "let indent" => tokens::ElmToken::LetIndent,
-        "endcase" => tokens::ElmToken::Endcase, // Dying of calling it "esac"
+        "endcase" => tokens::ElmToken::Endcase,
     }
 }
 

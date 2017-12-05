@@ -107,6 +107,6 @@ extern crate walkdir;
 pub mod packages_reader;
 mod tokens;
 pub mod lexer;
-pub mod parser;
+// pub mod parser;
 pub use tokens::ElmToken;
 pub use parser::Parser;

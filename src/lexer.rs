@@ -24,7 +24,9 @@
 //! I plan to fix up the panics issue and have proper
 //! error handling, but may take a while before I do that.
 
+use std::error;
 use std::iter::Peekable;
+
 use tokens::ElmToken;
 
 macro_rules! to_str {
@@ -35,6 +37,55 @@ macro_rules! first_char {
     ($string:ident) => (
         $string.chars().nth(0).unwrap()
     )
+}
+
+macro_rules! ret {
+    ($retval:expr) => (
+        return Some($retval)
+    )
+}
+
+#[derive(Debug,PartialEq,Eq,Clone)]
+pub enum LexError {
+    Char(&'static str),
+    Number(&'static str),
+    Generic(&'static str),
+    Foreign(Box<error::Error>),
+    BlockComment,
+
+}
+
+pub struct Lexed( Result< ((u16,u16),ElmToken,(u16,u16)), LexError >);
+
+impl Lexed {
+    pub fn map<F>(self, closure: F) -> Lexed
+        where F: FnOnce(ElmToken) -> ElmToken
+    {
+        Lexed( match self.0 {
+            Ok((begin, token, end)) => Ok((begin, closure(token), end)),
+            Err(x) => Err(x),
+        })
+    }
+
+    pub fn and_then<E,F>(self, closure: F) -> Lexed
+        where F: FnOnce(ElmToken) -> Result<ElmToken,Box<E>>,
+              E: error::Error,
+    {
+        Lexed(match self.0 {
+            Ok((begin, token, end)) =>
+                closure(token)
+                    .map(|x|(begin,x,end))
+                    .map_err(LexError::Foreign),
+            Err(x) => Err(x),
+        })
+    }
+
+    pub fn token(&self) -> Option<&ElmToken> {
+        match self.0 {
+            Ok((_,ref token,_)) => Some(token),
+            Err(_) => None,
+        }
+    }
 }
 
 fn is_operator(symbol : char) -> bool {
@@ -103,7 +154,7 @@ fn into_keyword(text_token : String) -> ElmToken {
         "let" => return ElmToken::Let,
         "in" => return ElmToken::In,
         _ => {},
-    }
+    };
     if is_operator(first_char!(text_token)) {
         ElmToken::Operator(text_token)
     } else if first_char!(text_token).is_alphabetic() {
@@ -133,7 +184,7 @@ fn consume_into<I>(
     //let mut i = 0;
     while let Some(&c) = input.peek() {
         if predicate(c) {
-            //i += (c == '\n') as i16;
+            //i += (c == '\n') as u16;
             input.next();
             into.push(c);
         } else {
@@ -160,7 +211,7 @@ fn consume_line_comment<I>(input: &mut Peekable<I>)
 ///
 /// returns`(Some(DocCommentToken), #linesConsumed)`
 fn consume_block_comment<I>(input: &mut Peekable<I>)
-    -> (Option<ElmToken>, i16)
+    -> (Option<ElmToken>, u16)
     where I: Iterator<Item=char>
 {
     let mut last = '\0';
@@ -181,7 +232,7 @@ fn consume_block_comment<I>(input: &mut Peekable<I>)
         let mut accum = String::new();
         input.next().unwrap(); //We checked this is a "|"
         while let Some(c) = input.next() {
-            nl_consumed += (c == '\n') as i16;
+            nl_consumed += (c == '\n') as u16;
             if last == '{' && c == '-' {
                 depth += 1
             } else if last == '-' && c == '}' {
@@ -197,7 +248,7 @@ fn consume_block_comment<I>(input: &mut Peekable<I>)
         (None, nl_consumed)
     } else {
         while let Some(c) = input.next() {
-            nl_consumed += (c == '\n') as i16;
+            nl_consumed += (c == '\n') as u16;
             if last == '{' && c == '-' {
                 depth += 1
             } else if last == '-' && c == '}' {
@@ -228,14 +279,31 @@ fn consume_name<I>(input: &mut Peekable<I>, into: &mut String)
 /// x[0-9a-fA-F]+
 /// [0-9]*(.[0-9]+)?(e[-+]?[0-9]+)?
 /// ```
-/// Currently, also accepts [0-9]x[0-9a-fA-F]+
-fn consume_number<I>(input: &mut Peekable<I>, into: &mut String)
+fn consume_number<I>(input: &mut Peekable<I>, from: char)
+    -> Result<String,LexError>
     where I: Iterator<Item=char>
 {
+    let mut into = String::new();
+    into.push(from);
+
     let is_hexa = match input.peek() { Some(&'x') => true, _ => false };
     if is_hexa {
-        into.push(input.next().expect("Lexing an hexadecimal number"));
-        consume_into(input, into, |c| c.is_digit(16))
+        if from != '0' {
+            return Err(LexError::Number(
+                "an hexadecimal number starts with 0x\
+                 and nothing else"
+            ))
+        }
+        let next_char = match input.next() {
+            Some(val) => val,
+            None => return Err(LexError::Number(
+                    "Expected an hexadecimal digit after 0x\
+                     but got nothing."
+            )),
+        };
+        into.push(next_char);
+        consume_into(input, into, |c| c.is_digit(16));
+        Ok(into)
     } else {
         let mut radix = false;
         let mut has_digit = false;
@@ -246,11 +314,12 @@ fn consume_number<I>(input: &mut Peekable<I>, into: &mut String)
                 '.' if !has_digit => { has_digit = true; },
                 'e' if !just_radix => { just_radix = true; has_digit = true},
                 '+' | '-' if just_radix && !radix => { radix = just_radix },
-                _ => { return; }
+                _ => return Ok(into),
             }
             input.next();
             into.push(c);
         }
+        Ok(into)
     }
 }
 
@@ -273,11 +342,11 @@ fn consume_char(input: &mut Iterator<Item=char>, into: &mut String) {
 
 /// This is the same parser as char, just ignores \"
 /// NOTE: doesn't include the closing " in the `into` String.
-fn consume_string(input: &mut Iterator<Item=char>, into: &mut String) -> i16 {
+fn consume_string(input: &mut Iterator<Item=char>, into: &mut String) -> u16 {
     let mut prev_is_escape = false;
     let mut nl_consumed = 0;
     while let Some(c) = input.next() {
-        nl_consumed += (c == '\n') as i16;
+        nl_consumed += (c == '\n') as u16;
         if c == '"' && !prev_is_escape {
             return nl_consumed;
         }
@@ -292,9 +361,10 @@ fn consume_string(input: &mut Iterator<Item=char>, into: &mut String) -> i16 {
 /// token, the Token is created accordingly.
 ///
 /// # Returns
-/// `(Some(parsedToken), #LinesConsumed)`
-fn consume_newline<I>(input: &mut Peekable<I>, line: i16)
-    -> (Option<ElmToken>, i16)
+/// `(Some(parsed_token), #lines_consumed, current_column)`
+/// The token is a None if we reach the last line of the file.
+fn consume_newline<I>(input: &mut Peekable<I>, line: u16)
+    -> (Option<ElmToken>, u16, u16)
     where I: Iterator<Item=char>
 {
     let mut nl_consumed = 0;
@@ -306,14 +376,18 @@ fn consume_newline<I>(input: &mut Peekable<I>, line: i16)
             _ => {
                 let this_line = nl_consumed + line;
                 return (
-                     Some( ElmToken::Newline(this_line, current_column) ),
-                     nl_consumed
+                     Some(ElmToken::Newline(
+                         this_line as i16,
+                         current_column as i16
+                     )),
+                     nl_consumed,
+                     current_column
                 )
             },
         };
         input.next();
     }
-    (None, nl_consumed)
+    (None, nl_consumed, 0)
 }
 
 
@@ -333,7 +407,8 @@ fn consume_newline<I>(input: &mut Peekable<I>, line: i16)
 /// last moment the evaluation of tokens.
 pub struct Lexer<I: Iterator<Item=char>> {
     input : Peekable<I>,
-    line_loc : i16,
+    line_loc : u16,
+    column_loc : u16
 }
 
 /// Implements the ability to convert a character stream
@@ -359,7 +434,7 @@ pub trait LexableIterator: Iterator<Item=char> {
 impl<T: Iterator<Item=char>> LexableIterator for T {}
 
 impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
-    type Item = ElmToken;
+    type Item = Lexed;
 
     /// Spews tokens while consuming the input stream.
     /// Behaves nicely on a file without syntax errors.
@@ -406,44 +481,44 @@ impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
     /// # Errors
     /// The stream may terminate early for
     /// undeterminate reasons, mostly broken code
-    fn next(&mut self) -> Option<ElmToken> {
+    fn next(&mut self) -> Option<Lexed> {
         { let input = &mut self.input; match input.next()? {
             '\r' => {},
             '\n' => {
-                let (token, nl_consumed) =
-                    consume_newline(input, self.line_loc + 1);
+                let (token, nl_consumed)
+                    = consume_newline(input, self.line_loc + 1);
                 self.line_loc += nl_consumed + 1;
                 return token
             },
             c if c.is_whitespace() => {},
-            '[' => { return Some(ElmToken::LBracket) },
-            ']' => { return Some(ElmToken::RBracket) },
-            '(' => { return Some(ElmToken::LParens) },
-            ')' => { return Some(ElmToken::RParens) },
-            ',' => { return Some(ElmToken::Comma) },
+            '[' => { ret!(ElmToken::LBracket) },
+            ']' => { ret!(ElmToken::RBracket) },
+            '(' => { ret!(ElmToken::LParens) },
+            ')' => { ret!(ElmToken::RParens) },
+            ',' => { ret!(ElmToken::Comma) },
             '{' => {
                 if input.peek().map_or(false, |&c| c == '-') {
                     match consume_block_comment(input) {
                         (Some(doc), nl_consumed) => {
                             self.line_loc += nl_consumed;
-                            return Some(doc)
+                            ret!(doc)
                         },
                         (None, nl_consumed) => self.line_loc += nl_consumed,
                     }
                 } else {
-                    return Some(ElmToken::LBrace)
+                    ret!(ElmToken::LBrace)
                 }
             },
-            '}' => { return Some(ElmToken::RBrace) },
+            '}' => { ret!(ElmToken::RBrace) },
             '.' => {
                 if input.peek().map_or(false, |&c| is_operator(c)) {
                     let mut into_buffer = String::from(".");
                     consume_operator(input, &mut into_buffer);
-                    return Some(into_keyword(into_buffer))
+                    ret!(into_keyword(into_buffer))
                 } else if input.peek().map_or(false, |&c| c.is_alphabetic()) {
                     let mut into_buffer = String::from(".");
                     consume_name(input, &mut into_buffer);
-                    return Some(ElmToken::Name(into_buffer))
+                    ret!(ElmToken::Name(into_buffer))
                 }
             },
             c if is_operator(c) => {
@@ -452,30 +527,29 @@ impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
                 } else {
                     let mut into_buffer : String = to_str!(c);
                     consume_operator(input, &mut into_buffer);
-                    return Some(into_keyword(into_buffer));
+                    ret!(into_keyword(into_buffer));
                 }
             },
             c if c.is_alphabetic() => {
                 let mut into_buffer : String = to_str!(c);
                 consume_name(input, &mut into_buffer);
-                return Some(into_keyword(into_buffer))
+                ret!(into_keyword(into_buffer))
             },
-            '_' => { return Some(ElmToken::Underscore) },
+            '_' => { ret!(ElmToken::Underscore) },
             '"' => {
                 let mut into_buffer = String::new();
                 let nl_consumed = consume_string(input, &mut into_buffer);
                 self.line_loc += nl_consumed;
-                return Some(ElmToken::StringLit(into_buffer))
+                ret!(ElmToken::StringLit(into_buffer))
             },
             '\'' => {
-                let mut into_buffer = String::new();
-                consume_char(input, &mut into_buffer);
-                return Some(ElmToken::Char(into_buffer));
+                let literal = consume_char(input);
+                ret!(ElmToken::Char(literal));
             },
             c @ '0' ... '9' => {
                 let mut into_buffer : String = to_str!(c);
                 consume_number(input, &mut into_buffer);
-                return Some(into_keyword(into_buffer))
+                ret!(into_keyword(into_buffer))
             },
             c => {
                 println!("######{}#####", c);

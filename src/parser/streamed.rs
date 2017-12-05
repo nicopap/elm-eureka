@@ -8,14 +8,18 @@ use itertools::{Coalesce,Itertools};
 use super::grammar::{parse_ModuleDeclr,parse_Import, parse_TopDeclr};
 use super::tree;
 use ::tokens::ElmToken;
-use ::lexer::{LexableIterator,Lexer};
-use self::ElmToken::{DocComment, Newline, Name, LParens, Port};
+use ::lexer::{LexableIterator,Lexer,Lexed};
+use self::ElmToken::{Newline};
 
 macro_rules! not_match {
-    ($to_match:pat) => ( |x| match *x { $to_match => false, _ => true })
+    ($to_match:pat) => (
+        |x : &Lexed| match x.token() { Some($to_match) => false, _ => true }
+    )
 }
 macro_rules! is_match {
-    ($to_match:pat) => ( |x| match x { $to_match => true, _ => false })
+    ($to_match:pat) => (
+        |x : &Lexed| match x.token() { Some($to_match) => true, _ => false }
+    )
 }
 
 // type SpanToken = Result<(usize, ElmToken, usize), LexError>;
@@ -23,8 +27,8 @@ macro_rules! is_match {
 // wrappers to deal with lazy input stream reification.
 type CoalSig<X> = fn(X, X)->Result<X, (X,X)>;
 type OMG<I>=Peekable<Coalesce<
-    SkipWhile< I,for<'r> fn(&'r ElmToken)->bool >,
-    CoalSig<ElmToken>
+    SkipWhile<I, for<'r> fn(&'r Lexed) -> bool>,
+    CoalSig<Lexed>
 >>;
 
 struct StageModuleDeclr;
@@ -91,25 +95,27 @@ struct StageEof {
 ///    (currently only parses type declarations)
 ///
 /// 5. EOF: Nothing more to be parsed.
-struct StreamParser<I: Iterator<Item=ElmToken>, S = StageModuleDeclr> {
+struct StreamParser<I: Iterator<Item=Lexed>, S=StageModuleDeclr> {
     input : OMG<I>,
     stage : S,
 }
 
 /// Converts a token stream into a parser
-trait IntoParsed: Iterator<Item=ElmToken> {
+trait IntoParsed: Iterator<Item=Lexed> {
     /// Add some processing to the input token stream and embed
     /// into the Iterator adaptator StreamParser at its initial
     /// stage.
     fn into_parsed(self) -> StreamParser<Self,StageModuleDeclr>
         where Self: Sized
     {
+        use self::ElmToken::{Type,Alias,Name};
         let is_newline : fn(&ElmToken) -> bool = is_match!(&Newline(_,_));
         let remove_dup_newlines : CoalSig<ElmToken> = |prev,cur| {
-            match (prev,cur) {
-                (Newline(_,_), latest@Newline(_,_)) => Ok(latest),
-                (ElmToken::Type, Name(ref content)) if content == "alias" =>
-                    Err((ElmToken::Type, ElmToken::Alias)),
+            match (prev.token(), cur.token()) {
+                (Some(Newline(_,_)), Some(latest@Newline(_,_))) =>
+                    Ok(latest),
+                (Some(Type), Some(Name(ref content)))
+                    if content == "alias" => Err(Type, Alias),
                 (prev_, cur_) => Err((prev_, cur_)),
             }
         };
@@ -122,9 +128,9 @@ trait IntoParsed: Iterator<Item=ElmToken> {
         }
     }
 }
-impl<T: Iterator<Item=ElmToken>> IntoParsed for T {}
+impl<T: Iterator<Item=Lexed>> IntoParsed for T {}
 
-impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageModuleDeclr> {
+impl<I:Iterator<Item=Lexed>> StreamParser<I,StageModuleDeclr> {
     fn next_step(mut self) -> StreamParser<I,StageModuleDoc> {
         // Consumes the module declaration, also consumes the next newline.
         let declr_stream =
@@ -132,8 +138,6 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageModuleDeclr> {
                 .by_ref()
                 .take_while(not_match!(Newline(_,0)))
                 .filter(not_match!(Newline(_,_)))
-                .enumerate()
-                .map(|(i, token)| Ok((i, token, i+1)))
                 .collect::<Vec<_>>();
         let module_declr = parse_ModuleDeclr(declr_stream).expect("Parsing Error");
         StreamParser {
@@ -143,10 +147,11 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageModuleDeclr> {
     }
 }
 
-impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageModuleDoc> {
+impl<I:Iterator<Item=Lexed>> StreamParser<I,StageModuleDoc> {
     fn next_step(mut self) -> StreamParser<I,StageImports> {
         // Consumes the doc string if existant.
-        match self.input.peek() {
+        use self::ElmToken::DocComment;
+        match self.input.peek().and_then(Lexed::token) {
             Some(&DocComment(_)) => {
                 let module_declr = self.stage.module_declr;
                 let module_doc = match self.input.next() {
@@ -171,17 +176,15 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageModuleDoc> {
     }
 }
 
-impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageImports> {
+impl<I:Iterator<Item=Lexed>> StreamParser<I,StageImports> {
     fn next_step(mut self) -> StreamParser<I,StageTopDeclrs> {
         let mut module_imports : Vec<tree::ElmImport> = Vec::new();
-        while self.input.peek() == Some(&ElmToken::Import) {
+        while self.input.peek().and_then(Lexed::token) == Some(&ElmToken::Import) {
             let import_stream =
                 self.input
                     .by_ref()
                     .take_while(not_match!(Newline(_,0)))
-                    .filter(not_match!(Newline(_,_)))
-                    .enumerate()
-                    .map(|(i, token)| Ok((i, token, i+1)));
+                    .filter(not_match!(Newline(_,_)));
             let cur_import = parse_Import(import_stream).expect("Parsing Error");
             module_imports.push(cur_import);
         }
@@ -195,21 +198,20 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageImports> {
 }
 
 
-impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageTopDeclrs> {
+impl<I:Iterator<Item=Lexed>> StreamParser<I,StageTopDeclrs> {
     fn next_step(mut self) -> StreamParser<I,StageEof> {
         // TODO: this is flawed because it doesn't capture lazily the
         // tokens for a type declaration.
+        use self::ElmToken::{Name,LParens,Port};
         let mut top_levels = Vec::new();
         loop {
-            match self.input.peek() {
+            match self.input.peek().and_then(Lexed::token) {
                 Some(&Name(_)) | Some(&LParens) | Some(&Port) => {
                     let preparsed_tokens =
                         self.input
                             .by_ref()
-                            .take_while(not_match!(ElmToken::Newline(_,0)))
-                            .filter_indent()
-                            .enumerate()
-                            .map(|(i, token)| Ok((i, token, i+1)));
+                            .take_while(not_match!(Newline(_,0)))
+                            .filter_indent();
                     top_levels.push(
                         parse_TopDeclr(preparsed_tokens)
                             .expect("Function Parsing Error")
@@ -219,10 +221,8 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageTopDeclrs> {
                     let toplevel_stream =
                         self.input
                             .by_ref()
-                            .take_while(not_match!(ElmToken::Newline(_,0)))
-                            .filter(not_match!(ElmToken::Newline(_,_)))
-                            .enumerate()
-                            .map(|(i, token)| Ok((i, token, i+1)));
+                            .take_while(not_match!(Newline(_,0)))
+                            .filter(not_match!(Newline(_,_)));
                     top_levels.push(
                         parse_TopDeclr(toplevel_stream)
                             .expect("Parsing Error")
@@ -248,7 +248,8 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageTopDeclrs> {
     }
 }
 
-#[derive(PartialEq, Copy, Clone)] enum IndentEntry {
+#[derive(PartialEq, Copy, Clone)]
+enum IndentEntry {
     Let(i16),
     Case(i16),
     // The delimiters are `let .. in`, `( .. )`, `[ .. ]`, `{ .. }`,
@@ -267,6 +268,7 @@ impl fmt::Debug for IndentEntry {
         }
     }
 }
+
 #[derive(PartialEq, Debug, Copy, Clone)] enum IndentTrigger {Let, Of}
 
 /// An iterator adaptator that turns Newline tokens into meaningfull
@@ -280,7 +282,7 @@ impl fmt::Debug for IndentEntry {
 /// also of enclosing delimiters such as `()`, `[]` or `{}`. This is so
 /// we do not insert `endcase` tokens at the wrong place.
 #[derive(Debug)]
-struct FilterIndent<I:Iterator<Item=ElmToken>> {
+struct FilterIndent<I:Iterator<Item=Lexed>> {
     input: I,
     // Holds information about the levels of indentation we are in, and
     // if there is "enclosing" expressions that renders `Of` ending moot.
@@ -289,10 +291,10 @@ struct FilterIndent<I:Iterator<Item=ElmToken>> {
     // it there so at the next newline we know what to do
     indent_trigger: Option<IndentTrigger>,
     // A buffer to hold multiple tokens we want to emit later.
-    buffer_stack: Vec<ElmToken>,
+    buffer_stack: Vec<Lexed>,
 }
 
-impl<I:Iterator<Item=ElmToken>> FilterIndent<I> {
+impl<I:Iterator<Item=Lexed>> FilterIndent<I> {
     // Pop `indent_stack`, closing off unfinished Case expressions by
     // pushing `Endcase` in `buffer_stack`. `indent_stack` is poped until
     // given `entry` is found, the corresponding item is poped from the
@@ -332,6 +334,7 @@ impl<I:Iterator<Item=ElmToken>> FilterIndent<I> {
         // 2. If not, returns.
         //    otherwise pops `indent_stack` up to the found `indent_level`
         use self::IndentEntry::{Case,Let};
+        use self::ElmToken::{CaseIndent,LetIndent,Endcase};
         if self.indent_stack.is_empty() { return }
         let stack_last = self.indent_stack.len() - 1;
         let mut idx = stack_last;
@@ -340,11 +343,11 @@ impl<I:Iterator<Item=ElmToken>> FilterIndent<I> {
             let current_indenter = self.indent_stack.get(idx).unwrap();
             match *current_indenter {
                 Case(indent) if indent == indent_level => {
-                    self.buffer_stack.push(ElmToken::CaseIndent);
+                    self.buffer_stack.push(CaseIndent);
                     break Some(idx)
                 },
                 Let(indent) if indent == indent_level => {
-                    self.buffer_stack.push(ElmToken::LetIndent);
+                    self.buffer_stack.push(LetIndent);
                     break Some(idx)
                 },
                 _ => {},
@@ -364,7 +367,7 @@ impl<I:Iterator<Item=ElmToken>> FilterIndent<I> {
                 for _ in 0..pop_count {
                     match self.indent_stack.pop().unwrap() {
                         Case(_) if last_indenter_is_case => {
-                            self.buffer_stack.push(ElmToken::Endcase);
+                            self.buffer_stack.push(Endcase);
                         },
                         Case(_) => last_indenter_is_case = true,
                         _ => last_indenter_is_case = false,
@@ -374,18 +377,18 @@ impl<I:Iterator<Item=ElmToken>> FilterIndent<I> {
                 if last_indenter_is_case
                    && self.indent_stack.last() == Some(&Case(indent_level))
                 {
-                    self.buffer_stack.push(ElmToken::Endcase)
+                    self.buffer_stack.push(Endcase)
                 }
             },
         }
     }
 }
 
-impl<I:Iterator<Item=ElmToken>> Iterator for FilterIndent<I> {
-    type Item=ElmToken;
+impl<I:Iterator<Item=Lexed>> Iterator for FilterIndent<I> {
+    type Item=Lexed;
     // TODO: keep track of location after the `let` keyword if
     // the next Token doesn't start at a new line
-    fn next(&mut self) -> Option<ElmToken> {
+    fn next(&mut self) -> Option<Lexed> {
         use self::ElmToken::*;
 
         if let Some(token) = self.buffer_stack.pop() { return Some(token) }
@@ -438,7 +441,7 @@ impl<I:Iterator<Item=ElmToken>> Iterator for FilterIndent<I> {
     }
 }
 
-trait TokenIterator: Iterator<Item=ElmToken> {
+trait TokenIterator: Iterator<Item=Lexed> {
     fn filter_indent(self) -> FilterIndent<Self> where Self: Sized {
         FilterIndent {
             input : self,
@@ -448,7 +451,7 @@ trait TokenIterator: Iterator<Item=ElmToken> {
         }
     }
 }
-impl<T: Iterator<Item=ElmToken>> TokenIterator for T {}
+impl<T: Iterator<Item=Lexed>> TokenIterator for T {}
 
 fn into_tree(parser: StageEof) -> tree::ElmModule {
     let StageEof{module_declr,module_doc,module_imports,top_levels}=parser;
@@ -470,7 +473,7 @@ fn into_tree(parser: StageEof) -> tree::ElmModule {
     }
 }
 
-enum ParserState<I:Iterator<Item=ElmToken>> {
+enum ParserState<I:Iterator<Item=Lexed>> {
     ModuleDeclr(StreamParser<I,StageModuleDeclr>),
     ModuleDoc(StreamParser<I,StageModuleDoc>),
     Imports(StreamParser<I,StageImports>),

@@ -1,0 +1,4 @@
+* Remove Newline token argument
+* Better error handling in lalrpop grammar
+* Add lexer errors and token location tracking
+* Add interner to lexer
