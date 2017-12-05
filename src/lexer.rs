@@ -1,7 +1,7 @@
 //! A lexer to tokenize elm source code
 //!
 //! Currently, tokenizes most valid elm code, but also
-//! a lot of invalid elm code. One soar point is the
+//! a lot of invalid elm code. One sore point is the
 //! handling of literals.
 //!
 //! Currently multiline string literals are not
@@ -10,19 +10,6 @@
 //! the content of the string will be captured
 //! into a string literal token)
 //!
-//! Indentation at newline is kept track of with the
-//! Newline token.
-//!
-//! Shortly on the roadmap is a better API for location
-//! tracking.
-//!
-//! Note that the shortcomming of this module, while
-//! it would be terrible for a compiler, are not too
-//! problematic: we mostly intend to parse *valid* elm
-//! code.
-//!
-//! I plan to fix up the panics issue and have proper
-//! error handling, but may take a while before I do that.
 
 use std::error;
 use std::iter::Peekable;
@@ -45,14 +32,14 @@ macro_rules! ret {
     )
 }
 
-#[derive(Debug,PartialEq,Eq,Clone)]
+#[derive(Debug,PartialEq,Clone)]
 pub enum LexError {
     Char(&'static str),
+    StringLit(&'static str),
     Number(&'static str),
-    Generic(&'static str),
-    Foreign(Box<error::Error>),
+    Generic,
+    Foreign,//(Box<error::Error>),
     BlockComment,
-
 }
 
 pub struct Lexed( Result< ((u16,u16),ElmToken,(u16,u16)), LexError >);
@@ -75,7 +62,7 @@ impl Lexed {
             Ok((begin, token, end)) =>
                 closure(token)
                     .map(|x|(begin,x,end))
-                    .map_err(LexError::Foreign),
+                    .map_err(|_| LexError::Foreign),
             Err(x) => Err(x),
         })
     }
@@ -171,106 +158,124 @@ fn into_keyword(text_token : String) -> ElmToken {
 /// name. Builds up a string into the input "into", until "predicate"
 /// solves.
 ///
+/// Returns the number of consumed characters.
 /// NOTE: on the *consume* functions: they work without the
-/// "opening" character. One needs to provide a `into` String
-/// in which the first character is already written to have
-/// the full token string.
+/// "opening" character.
 fn consume_into<I>(
     input: &mut Peekable<I>,
     into: &mut String,
     predicate: fn(char) -> bool
-)   where I: Iterator<Item=char>
+) -> u16
+    where I: Iterator<Item=char>
 {
-    //let mut i = 0;
+    let mut consumed_chars = 0;
     while let Some(&c) = input.peek() {
         if predicate(c) {
-            //i += (c == '\n') as u16;
+            consumed_chars += 1;
             input.next();
             into.push(c);
         } else {
-            return
+            return consumed_chars
         }
     }
 }
 
-/// Consumes the rest of a line until '\n' (does
-/// not consume the end of line)
-fn consume_line_comment<I>(input: &mut Peekable<I>)
-    where I: Iterator<Item=char>
-{
-    while let Some(&c) = input.peek() {
-        if c == '\n' { return }
-        let _ = input.next();
+/// Consumes the rest of a line until '\n' (consuming)
+/// Also returns when reaching the end of the file
+fn consume_line_comment(input: &mut Iterator<Item=char>) {
+    loop {
+        match input.next() {
+            Some('\n') => return,
+            None => return,
+            _ => {},
+        }
     }
 }
 
 /// Consumes a block comment. Handles properly nested
-/// block comments. This function doesn't accumulate
-/// the input into a buffer. Instead, it returns a
-/// string if the comment was a doc comment.
+/// block comments. It returns a string if the comment
+/// was a doc comment.
 ///
-/// returns`(Some(DocCommentToken), #linesConsumed)`
+/// ## Returns
+/// `(Some(docContent), #linesConsumed, columnEnd)`
+///
+/// where:
+/// #linesConsumed is the number of line that has been consumed
+/// columnEnd is special:
+/// * if #linesConsumed is 0, then it is the number of characters consumed
+/// * otherwise, it is the column at which the comment block finishes
+///
+/// say you have a block like this:
+/// ```
+/// {- Some
+/// comment -}
+/// ```
+/// columnEnd is 10, the column at which the comment end
+///
+/// if you have:
+/// ```
+/// let {- Important variable! -} x = 10 in x * x
+/// ```
+/// columnEnd is 24: how many characters were consumed.
+///
+/// docContent is the string content of the comment, if it is
+/// a doc comment, otherwise it is None.
+///
+/// If the end of file is hit, returns None
 fn consume_block_comment<I>(input: &mut Peekable<I>)
-    -> (Option<ElmToken>, u16)
+    -> Option<(Option<String>, u16, u16)>
     where I: Iterator<Item=char>
 {
     let mut last = '\0';
     let mut depth = 1i64;
     let mut nl_consumed = 0;
+    let mut column = 1;
     let is_doc = {
-        let second = match input.next() {
-            Some(character) => character,
-            None => return (None, 0),
-        };
-        let third = match input.peek() {
-            Some(&character) => character,
-            None => return (None, 0),
-        };
+        let second = input.next()?;
+        let third = *input.peek()?;
         second == '-' && third == '|'
     };
-    if is_doc {
-        let mut accum = String::new();
-        input.next().unwrap(); //We checked this is a "|"
-        while let Some(c) = input.next() {
-            nl_consumed += (c == '\n') as u16;
-            if last == '{' && c == '-' {
-                depth += 1
-            } else if last == '-' && c == '}' {
-                depth -= 1
-            };
-            if depth == 0 {
-                accum.pop().unwrap(); // should be the last -
-                return (Some(ElmToken::DocComment(accum)), nl_consumed)
-            }
-            accum.push(c);
-            last = c;
+    let mut accum = String::new();
+    if is_doc {input.next().unwrap()} //We checked this is a "|"
+    while c = input.next()? {
+        nl_consumed += (c == '\n') as u16;
+        column = (column + 1) * (c != '\n') as u16;
+        if last == '{' && c == '-' {
+            depth += 1
+        } else if last == '-' && c == '}' {
+            depth -= 1
         }
-        (None, nl_consumed)
-    } else {
-        while let Some(c) = input.next() {
-            nl_consumed += (c == '\n') as u16;
-            if last == '{' && c == '-' {
-                depth += 1
-            } else if last == '-' && c == '}' {
-                depth -= 1
-            };
-            last = c;
-            if depth == 0 { return (None, nl_consumed) }
+        if depth == 0 {
+            accum.pop().unwrap(); // should be the last -
+            return Some((
+                if is_doc {Some(accum)} else {None},
+                nl_consumed,
+                column
+            ))
         }
-        (None, nl_consumed)
+        accum.push(c);
+        last = c;
     }
+    None // Reached EOF before finishing the block comment
 }
 
-fn consume_operator<I>(input: &mut Peekable<I>, into: &mut String)
+fn consume_operator<I>(input: &mut Peekable<I>, from: char) -> (String,u16)
     where I: Iterator<Item=char>
 {
-    consume_into(input, into, is_operator)
+    let mut ret = String::new();
+    ret.push(from);
+    let consumed_chars = consume_into(input, into, is_operator);
+    (ret,consumed_chars)
 }
 
-fn consume_name<I>(input: &mut Peekable<I>, into: &mut String)
+fn consume_name<I>(input: &mut Peekable<I>, from: char) -> (String,u16)
     where I: Iterator<Item=char>
 {
-    consume_into(input, into, |c| c.is_alphanumeric() || c == '.' || c == '_')
+    let mut ret = String::new();
+    ret.push(from);
+    let consumed_chars
+        = consume_into(input, ret, |c| c.is_alphanumeric()||c=='.'||c=='_');
+    (ret,consumed_chars)
 }
 
 /// Consumes a number literal. A number literal can be one of the
@@ -279,6 +284,10 @@ fn consume_name<I>(input: &mut Peekable<I>, into: &mut String)
 /// x[0-9a-fA-F]+
 /// [0-9]*(.[0-9]+)?(e[-+]?[0-9]+)?
 /// ```
+///
+/// ## Returns
+/// Ok(NumberString, #consumedChar) if succesful,
+/// Err(LexError) in case of error.
 fn consume_number<I>(input: &mut Peekable<I>, from: char)
     -> Result<String,LexError>
     where I: Iterator<Item=char>
@@ -323,37 +332,120 @@ fn consume_number<I>(input: &mut Peekable<I>, from: char)
     }
 }
 
-/// Why use a string to represent the content of a char? well, escape
-/// sequences, my dear!
-/// This just makes sure that '\'' doesn't trip up the lexer
-/// We intend to parse valid code anyway, we can accept garbage to an
-/// extent.
-/// NOTE: doesn't include the closing ' in the `into` String.
-fn consume_char(input: &mut Iterator<Item=char>, into: &mut String) {
-    let mut prev_is_escape = false;
-    while let Some(c) = input.next() {
-        if c == '\'' && !prev_is_escape {
-            return;
-        }
-        prev_is_escape = c == '\\' && !prev_is_escape;
-        into.push(c);
+/// More or less makes sure that it is a valid character literal.
+/// It won't check that \x... escapes are within reasonable bounds of
+/// Unicode world.
+///
+/// ## Errors
+/// - When EOF is reached before the end of the character
+/// - When the literal is invalid
+///
+/// ## Notes
+/// Doesn't include the closing ' in the `into` String and
+/// assumes the opening ' has been consumed
+fn consume_char(input: &mut Iterator<Item=char>)
+    -> Result<String,LexError>
+{
+    macro_rules! finish_char {
+        () => ({
+            input.as_ref().take_while(|x| x != '\'').for_each(|_|{});
+            Err(LexError::Char("Character token is too big"))
+        });
+        (EOF) => (Err(LexError::Char("Reached EOF while lexing a char")));
+        ($msg:expr) => ({
+            input.as_ref().take_while(|x| x != '\'').for_each(|_|{});
+            Err(LexError::Char($msg))
+        })
+    }
+    match input.next() {
+        Some('\\') => {},
+        Some('\n') => return
+            finish_char!("Newlines are not allowed in character literals"),
+        Some(c) => {
+            return match input.next() {
+                Some('\'') => Ok(format!("{}", c)),
+                Some(_) => finish_char!(),
+                None => finish_char!(EOF),
+            }
+        },
+        None => return finish_char!(EOF),
+    };
+    match input.next() {
+        Some(c) if c == '0' || c == 'x' => {
+            let mut acc = format!("{}", c);
+            loop { match input.next() {
+                Some('\'') => return Ok(acc),
+                Some(c) if c.is_digit(16) => acc.push(c) ,
+                Some(_) => return finish_char!("Invalid character token"),
+                None => return finish_char!(EOF),
+            }}
+        },
+        Some(c) => {
+            match input.next() {
+                Some('\'') => Ok(format!("{}", c)),
+                Some(_) => finish_char!(),
+                None => finish_char!(EOF),
+            }
+        },
+        None => finish_char!(EOF),
     }
 }
 
-/// This is the same parser as char, just ignores \"
-/// NOTE: doesn't include the closing " in the `into` String.
-fn consume_string(input: &mut Iterator<Item=char>, into: &mut String) -> u16 {
+/// Discriminates between triple-quoted string literals and
+/// simply-quoted ones, returns the content of the literal.
+///
+/// ## Errors
+/// - When EOF is reached before the end of the string.
+/// - When there is a line return inside a simply-quoted string.
+///
+/// ## Notes
+/// Doesn't include the closing " in the `into` String,
+/// assumes the first " was consumed.
+fn consume_string<I>(input: &mut Peekable<I>)
+    -> Result<(String, u16, u16),LexError>
+    where I:Iterator<Item=char>
+{
+    macro_rules! finish_string {
+        (EOF)=>(Err(LexError::StringLit("Reached EOF while lexing a string")));
+        ($msg:expr) => ( {
+            input.as_ref().take_while(|x| x != '"').for_each(|_|{});
+            Err(LexError::StringLit($msg))
+        } )
+    }
+    let mut acc = String::new();
     let mut prev_is_escape = false;
     let mut nl_consumed = 0;
-    while let Some(c) = input.next() {
+    let mut column = 0;
+    let is_multiline = {
+        let second = input.next()?;
+        let third = *input.peek()?;
+        second == '"' && third == '"'
+    };
+    loop {
+        let next_char = input.next();
+        match next_char {
+            Some('\n') if !is_multiline => return finish_string!(
+                "End of line in simply-quoted string literal"
+            ),
+            Some('"') if !is_multiline && !prev_is_escape => {
+                return Ok(acc, nl_consumed, column)
+            },
+            Some('\\') => {
+                prev_is_escape = !prev_is_escape;
+            },
+            None => finish_string!(EOF),
+        }
+        acc.push(next_char);
+    }
+
+    /*{{  i
         nl_consumed += (c == '\n') as u16;
         if c == '"' && !prev_is_escape {
             return nl_consumed;
         }
         prev_is_escape = c == '\\' && !prev_is_escape;
-        into.push(c);
-    }
-    nl_consumed
+        acc.push(c);
+    }}*/
 }
 
 /// Consumes up to the first non-whitespace. returns the proper
@@ -428,10 +520,12 @@ pub trait LexableIterator: Iterator<Item=char> {
         Lexer {
             input: self.peekable(),
             line_loc: 1,
+            column_loc: 0,
         }
     }
 }
 impl<T: Iterator<Item=char>> LexableIterator for T {}
+
 
 impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
     type Item = Lexed;
@@ -453,7 +547,11 @@ impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
     /// let elm_source = "f x = λy -> x ** y
     /// g x = \"string\" ++ toString <| x * 9";
     /// let lexer = elm_source.chars().lex();
-    /// let tokenized_source = lexer.collect::<Vec<ElmToken>>();
+    /// let tokenized_source
+    ///     = lexer
+    ///         .map(Lexed::token)
+    ///         .map(Option::unwrap)
+    ///         .collect::<Vec<ElmToken>>();
     /// assert_eq!(tokenized_source, vec![
     ///     Name(String::from("f")),
     ///     Name(String::from("x")),
@@ -470,8 +568,7 @@ impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
     ///     Assign,
     ///     StringLit(String::from("string")),
     ///     Operator(String::from("++")),
-    ///     Name(String::from("toString")),
-    ///     Operator(String::from("<|")),
+    ///     Name(String::from("toString")), Operator(String::from("<|")),
     ///     Name(String::from("x")),
     ///     Operator(String::from("*")),
     ///     Number(String::from("9")),
@@ -482,34 +579,61 @@ impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
     /// The stream may terminate early for
     /// undeterminate reasons, mostly broken code
     fn next(&mut self) -> Option<Lexed> {
+        macro_rules! make_lexed {
+            ($token:expr; $beginline:expr; $begincol:expr) => (
+                return Some(Lexed(Ok((
+                        ($beginline, $begincol),
+                        $token,
+                        (self.line_loc, self.column_loc)))))
+            )
+        }
+        macro_rules! make_char_lexed { ($token:ident) => (
+            make_lexed!(ElmToken::$token; self.line_loc; self.column_loc - 1)
+        ) }
+        macro_rules! map_literal { ($consumer:expr, $token:ident) => (
+            return Some($consumer.map(|consume_res| {
+                self.column_loc += consume_res.len() - 1;
+                ( (self.line_loc, self.column_loc - 1),
+                  ElmToken::$token(consume_res),
+                  (self.line_loc, self.column_loc + consume_res.len()-1))
+            }))
+        ) }
+
+        self.column_loc += 1;
         { let input = &mut self.input; match input.next()? {
             '\r' => {},
             '\n' => {
-                let (token, nl_consumed)
+                let (token, nl_consumed, column)
                     = consume_newline(input, self.line_loc + 1);
                 self.line_loc += nl_consumed + 1;
-                return token
+                self.column_loc = column;
+                return token.map(|t| Lexed(Ok((
+                    (self.line_loc, self.column_loc),
+                    t,
+                    (self.line_loc, self.column_loc)
+                ))))
             },
             c if c.is_whitespace() => {},
-            '[' => { ret!(ElmToken::LBracket) },
-            ']' => { ret!(ElmToken::RBracket) },
-            '(' => { ret!(ElmToken::LParens) },
-            ')' => { ret!(ElmToken::RParens) },
-            ',' => { ret!(ElmToken::Comma) },
+            '[' => make_char_lexed!(LBracket),
+            ']' => make_char_lexed!(RBracket),
+            '(' => make_char_lexed!(LParens),
+            ')' => make_char_lexed!(RParens),
+            ',' => make_char_lexed!(Comma),
             '{' => {
                 if input.peek().map_or(false, |&c| c == '-') {
                     match consume_block_comment(input) {
                         (Some(doc), nl_consumed) => {
                             self.line_loc += nl_consumed;
-                            ret!(doc)
+                            make_lexed!(doc, )
                         },
-                        (None, nl_consumed) => self.line_loc += nl_consumed,
+                        (None, nl_consumed) =>
+                            self.line_loc += nl_consumed,
                     }
                 } else {
-                    ret!(ElmToken::LBrace)
+                    make_char_lexed!(LBrace)
                 }
             },
-            '}' => { ret!(ElmToken::RBrace) },
+            '}' => make_char_lexed!(RBrace),
             '.' => {
                 if input.peek().map_or(false, |&c| is_operator(c)) {
                     let mut into_buffer = String::from(".");
@@ -524,6 +648,8 @@ impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
             c if is_operator(c) => {
                 if c == '-' && input.peek().map_or(false, |&c| c == '-') {
                     consume_line_comment(input);
+                    self.line_loc += 1;
+                    self.column_loc = 0;
                 } else {
                     let mut into_buffer : String = to_str!(c);
                     consume_operator(input, &mut into_buffer);
@@ -535,22 +661,15 @@ impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
                 consume_name(input, &mut into_buffer);
                 ret!(into_keyword(into_buffer))
             },
-            '_' => { ret!(ElmToken::Underscore) },
+            '_' => make_char_lexed!(Underscore),
             '"' => {
                 let mut into_buffer = String::new();
                 let nl_consumed = consume_string(input, &mut into_buffer);
                 self.line_loc += nl_consumed;
                 ret!(ElmToken::StringLit(into_buffer))
             },
-            '\'' => {
-                let literal = consume_char(input);
-                ret!(ElmToken::Char(literal));
-            },
-            c @ '0' ... '9' => {
-                let mut into_buffer : String = to_str!(c);
-                consume_number(input, &mut into_buffer);
-                ret!(into_keyword(into_buffer))
-            },
+            '\'' => map_literal!(consume_char(input), Char),
+            c @ '0' ... '9' => map_literal!(consume_number(input,c), Number),
             c => {
                 println!("######{}#####", c);
                 return None
