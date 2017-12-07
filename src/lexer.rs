@@ -5,33 +5,13 @@
 //! handling of literals.
 //!
 //! Currently multiline string literals are not
-//! lexed correctly (though this doesn't impeed
-//! to the parsing of the rest of the file, as
-//! the content of the string will be captured
-//! into a string literal token)
+//! lexed correctly.
 //!
 //! Indentation at newline is kept track of with the
 //! Newline token.
-//!
-//! Shortly on the roadmap is a better API for location
-//! tracking.
-//!
-//! Note that the shortcomming of this module, while
-//! it would be terrible for a compiler, are not too
-//! problematic: we mostly intend to parse *valid* elm
-//! code.
-//!
-//! I plan to fix up the panics issue and have proper
-//! error handling, but may take a while before I do that.
 
 use std::iter::Peekable;
 use tokens::ElmToken;
-
-macro_rules! first_char {
-    ($string:ident) => (
-        $string.chars().nth(0).unwrap()
-    )
-}
 
 fn is_operator(symbol : char) -> bool {
     match symbol {
@@ -40,73 +20,6 @@ fn is_operator(symbol : char) -> bool {
         '|' | '&' | '%' | '^' | '#' |
         '$' | '?' | '@' | '~' | '\\' => true,
         _ => false
-    }
-}
-
-/// Converts a name/operator string into an elm token.
-/// It checks for keywords and the type of name it is, and
-/// returns the token accordingly.
-///
-/// The input `text_token` must be a full word, such as a name or
-/// operator.
-///
-/// # Examples
-///
-/// ```ignore
-/// let token1 = String::from("then");
-/// assert_eq!(into_keyword(token1), ElmToken::Then);
-///
-/// let token2 = String::from("effect");
-/// assert_eq!(into_keyword(token2), ElmToken::Name(String::from("effect")));
-///
-/// let token3 = String::from("<*|>");
-/// assert_eq!(into_keyword(token3), ElmToken::Operator(String::from("<*|>")));
-/// ```
-/// # Panics
-/// When `text_token` is neither a keyword or name token (typically
-/// empty strings or strings with whitespaces will raise a panic)
-///
-/// ```ignore
-/// let bad_token1 = String::from("");
-/// into_keyword(bad_token1);
-///
-/// let bad_token2 = String::from(" filter (+)");
-/// into_keyword(bad_token2)
-/// ```
-fn into_keyword(text_token : String) -> ElmToken {
-    match text_token.as_ref() {
-        "module" => return ElmToken::Module,
-        "exposing" => return ElmToken::Exposing,
-        "import" => return ElmToken::Import,
-        "as" => return ElmToken::As,
-        ".." => return ElmToken::Ellision,
-        "λ" => return ElmToken::Lambda,
-        "\\" => return ElmToken::Lambda,
-        "->" => return ElmToken::RArrow,
-        "case" => return ElmToken::Case,
-        "of" => return ElmToken::Of,
-        "if" => return ElmToken::If,
-        "then" => return ElmToken::Then,
-        "else" => return ElmToken::Else,
-        "|" => return ElmToken::Pipe,
-        "=" => return ElmToken::Assign,
-        ":" => return ElmToken::Colon,
-        "type" => return ElmToken::Type,
-        "infixr" => return ElmToken::Infixr,
-        "infixl" => return ElmToken::Infixl,
-        "infix" => return ElmToken::Infixl, //infix implies infixl
-        "port" => return ElmToken::Port,
-        "where" => return ElmToken::Where,
-        "let" => return ElmToken::Let,
-        "in" => return ElmToken::In,
-        _ => {},
-    }
-    if is_operator(first_char!(text_token)) {
-        ElmToken::Operator(text_token)
-    } else if first_char!(text_token).is_alphabetic() {
-        ElmToken::Name(text_token)
-    } else {
-        panic!(format!("#{}# was not a recognizable token!", text_token))
     }
 }
 
@@ -125,14 +38,10 @@ fn consume_into<I>(
     predicate: fn(char) -> bool
 )   where I: Iterator<Item=char>
 {
-    //let mut i = 0;
-    while let Some(&c) = input.peek() {
-        if predicate(c) {
-            //i += (c == '\n') as i16;
-            input.next();
-            into.push(c);
-        } else {
-            return
+    loop {
+        match input.peek() {
+            Some(&c) if predicate(c) => into.push(input.next().unwrap()),
+            _ => break,
         }
     }
 }
@@ -144,7 +53,7 @@ fn consume_line_comment<I>(input: &mut Peekable<I>)
 {
     while let Some(&c) = input.peek() {
         if c == '\n' { return }
-        let _ = input.next();
+        let _ = input.next().unwrap();
     }
 }
 
@@ -154,8 +63,7 @@ fn consume_line_comment<I>(input: &mut Peekable<I>)
 /// string if the comment was a doc comment.
 ///
 /// returns`(Some(DocCommentToken), #linesConsumed)`
-fn consume_block_comment<I>(input: &mut Peekable<I>)
-    -> (Option<ElmToken>, i16)
+fn consume_block_comment<I>(input: &mut Peekable<I>) -> (Option<ElmToken>, i16)
     where I: Iterator<Item=char>
 {
     let mut last = '\0';
@@ -205,16 +113,52 @@ fn consume_block_comment<I>(input: &mut Peekable<I>)
     }
 }
 
-fn consume_operator<I>(input: &mut Peekable<I>, into: &mut String)
+fn consume_operator<I>(input: &mut Peekable<I>, from: char) -> ElmToken
     where I: Iterator<Item=char>
 {
-    consume_into(input, into, is_operator)
+    let mut into = String::new();
+    into.push(from);
+    consume_into(input, &mut into, is_operator);
+    match into.as_ref() {
+        ".." => return ElmToken::Ellision,
+        "λ" => return ElmToken::Lambda,
+        "\\" => return ElmToken::Lambda,
+        "->" => return ElmToken::RArrow,
+        "|" => return ElmToken::Pipe,
+        "=" => return ElmToken::Assign,
+        ":" => return ElmToken::Colon,
+        _ => {},
+    }
+    ElmToken::Operator(into)
 }
 
-fn consume_name<I>(input: &mut Peekable<I>, into: &mut String)
+fn consume_name<I>(input: &mut Peekable<I>, from: char) -> ElmToken
     where I: Iterator<Item=char>
 {
-    consume_into(input, into, |c| c.is_alphanumeric() || c == '.' || c == '_')
+    let mut into = String::new();
+    into.push(from);
+    consume_into(input, &mut into, |c| c.is_alphanumeric()||c=='.'||c=='_');
+    match into.as_ref() {
+        "module" => return ElmToken::Module,
+        "exposing" => return ElmToken::Exposing,
+        "import" => return ElmToken::Import,
+        "as" => return ElmToken::As,
+        "case" => return ElmToken::Case,
+        "of" => return ElmToken::Of,
+        "if" => return ElmToken::If,
+        "then" => return ElmToken::Then,
+        "else" => return ElmToken::Else,
+        "type" => return ElmToken::Type,
+        "infixr" => return ElmToken::Infixr,
+        "infixl" => return ElmToken::Infixl,
+        "infix" => return ElmToken::Infixl, //infix implies infixl
+        "port" => return ElmToken::Port,
+        "where" => return ElmToken::Where,
+        "let" => return ElmToken::Let,
+        "in" => return ElmToken::In,
+        _ => {},
+    }
+    ElmToken::Name(into)
 }
 
 /// Consumes a number literal. A number literal can be one of the
@@ -224,28 +168,34 @@ fn consume_name<I>(input: &mut Peekable<I>, into: &mut String)
 /// [0-9]*(.[0-9]+)?(e[-+]?[0-9]+)?
 /// ```
 /// Currently, also accepts [0-9]x[0-9a-fA-F]+
-fn consume_number<I>(input: &mut Peekable<I>, into: &mut String)
+fn consume_number<I>(input: &mut Peekable<I>, from: char) -> ElmToken
     where I: Iterator<Item=char>
 {
+    let mut into = String::new();
+    into.push(from);
     let is_hexa = match input.peek() { Some(&'x') => true, _ => false };
     if is_hexa {
         into.push(input.next().unwrap());
-        consume_into(input, into, |c| c.is_digit(16))
+        consume_into(input, &mut into, |c| c.is_digit(16));
+        ElmToken::Number(into)
     } else {
         let mut radix = false;
         let mut has_digit = false;
         let mut just_radix = false;
         while let Some(&c) = input.peek() {
             match c {
-                val if val.is_digit(10) => { radix = just_radix; },
-                '.' if !has_digit => { has_digit = true; },
-                'e' if !just_radix => { just_radix = true; has_digit = true},
-                '+' | '-' if just_radix && !radix => { radix = just_radix },
-                _ => { return; }
+                val if val.is_digit(10)           => radix = just_radix,
+                '.' if !has_digit                 => has_digit = true,
+                '+' | '-' if just_radix && !radix => radix = just_radix,
+                'e' | 'E' if !just_radix => {
+                    just_radix = true; has_digit = true
+                },
+                _ => return ElmToken::Number(into),
             }
-            input.next();
-            into.push(c);
+            // If it was none, we would have broken out of the loop just before
+            into.push(input.next().unwrap());
         }
+        ElmToken::Number(into)
     }
 }
 
@@ -255,31 +205,38 @@ fn consume_number<I>(input: &mut Peekable<I>, into: &mut String)
 /// We intend to parse valid code anyway, we can accept garbage to an
 /// extent.
 /// NOTE: doesn't include the closing ' in the `into` String.
-fn consume_char(input: &mut Iterator<Item=char>, into: &mut String) {
+fn consume_char(input: &mut Iterator<Item=char>) -> ElmToken {
+    let mut into = String::new();
     let mut prev_is_escape = false;
-    while let Some(c) = input.next() {
-        if c == '\'' && !prev_is_escape {
-            return;
+    loop {
+        match input.next() {
+            None => break ElmToken::Char(into),
+            Some('\'') if !prev_is_escape => break ElmToken::Char(into),
+            Some(c) => {
+                prev_is_escape = c == '\\' && !prev_is_escape;
+                into.push(c);
+            },
         }
-        prev_is_escape = c == '\\' && !prev_is_escape;
-        into.push(c);
     }
 }
 
 /// This is the same parser as char, just ignores \"
 /// NOTE: doesn't include the closing " in the `into` String.
-fn consume_string(input: &mut Iterator<Item=char>, into: &mut String) -> i16 {
+fn consume_string(input: &mut Iterator<Item=char>)
+    -> (ElmToken, i16)
+{
+    let mut into = String::new();
     let mut prev_is_escape = false;
     let mut nl_consumed = 0;
     while let Some(c) = input.next() {
         nl_consumed += (c == '\n') as i16;
         if c == '"' && !prev_is_escape {
-            return nl_consumed;
+            return (ElmToken::StringLit(into), nl_consumed)
         }
         prev_is_escape = c == '\\' && !prev_is_escape;
         into.push(c);
     }
-    nl_consumed
+    (ElmToken::StringLit(into), nl_consumed)
 }
 
 /// Consumes up to the first non-whitespace. returns the proper
@@ -407,19 +364,11 @@ impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
         let old_white = self.last_white;
         self.last_white = false;
 
-        { let input = &mut self.input;
-        macro_rules! bufftoken {
-            ($init:expr, $consumer:ident, $builder:expr) => ( {
-                let mut into_buffer = String::new();
-                into_buffer.push($init);
-                $consumer(input, &mut into_buffer);
-                return Some($builder(into_buffer))
-            } )
-        }; match input.next()? {
+        { let input = &mut self.input; match input.next()? {
             '\r' => {},
             '\n' => {
-                let (token, nl_consumed) =
-                    consume_newline(input, self.line_loc + 1);
+                let (token, nl_consumed)
+                    = consume_newline(input, self.line_loc + 1);
                 self.line_loc += nl_consumed + 1;
                 self.last_white = true;
                 return token
@@ -441,44 +390,59 @@ impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
                     }
                 } else { return Some(ElmToken::LBrace) }
             },
-            '}' => return Some(ElmToken::RBrace),
+            '}' =>
+                return Some(ElmToken::RBrace),
+
             '.' => match input.peek() {
                 Some(&c) if is_operator(c) =>
-                    bufftoken!('.', consume_operator, into_keyword),
+                    return Some(consume_operator(input, '.')),
+
                 Some(&c) if c.is_alphabetic() =>
-                    bufftoken!('.', consume_name, ElmToken::Name),
+                    return Some(consume_name(input, '.')),
+
                 _ => unreachable!(),
             },
             '-' => match input.peek() {
-                    Some(&'-') => consume_line_comment(input),
+                    Some(&'-') =>
+                        consume_line_comment(input),
+
                     Some(&c) if is_operator(c) =>
-                        bufftoken!('-', consume_operator, into_keyword),
+                        return Some(consume_operator(input, '-')),
+
                     Some(_) if !old_white =>
                         return Some(ElmToken::Operator(String::from("-"))),
+
                     Some(&c) if c.is_digit(10) =>
                         //FIXME: add proper handling for prefix '-' (requires
                         //patching the expression grammar). Currently,
                         //valid constructs such as 10 -(3 * 3) will blow up
-                        bufftoken!('-', consume_number, ElmToken::Number),
+                        return Some(consume_number(input, '-')),
+
                     Some(_) =>
                         return Some(ElmToken::Operator(String::from("-"))),
+
                     None => unreachable!(),
             },
-            c if is_operator(c) => bufftoken!(c,consume_operator,into_keyword),
-            c if c.is_alphabetic() => bufftoken!(c,consume_name,into_keyword),
-            c @ '0' ... '9' => bufftoken!(c, consume_number, ElmToken::Number),
-            '_' => return Some(ElmToken::Underscore),
+            c if is_operator(c) =>
+                return Some(consume_operator(input, c)),
+
+            c if c.is_alphabetic() =>
+                return Some(consume_name(input, c)),
+
+            c @ '0' ... '9' =>
+                return Some(consume_number(input, c)),
+
+            '_' =>
+                return Some(ElmToken::Underscore),
+
             '"' => {
-                let mut into_buffer = String::new();
-                let nl_consumed = consume_string(input, &mut into_buffer);
+                let (token, nl_consumed) = consume_string(input);
                 self.line_loc += nl_consumed;
-                return Some(ElmToken::StringLit(into_buffer))
+                return Some(token)
             },
-            '\'' => {
-                let mut into_buffer = String::new();
-                consume_char(input, &mut into_buffer);
-                return Some(ElmToken::Char(into_buffer));
-            },
+            '\'' =>
+                return Some(consume_char(input)),
+
             c => {
                 println!("######{}#####", c);
                 return None
@@ -492,7 +456,7 @@ impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
     use super::*;
 
     macro_rules! s {
-        ($fn_to_call:ident, $str_to_conv:expr) => (
+        ($fn_to_call:expr, $str_to_conv:expr) => (
             $fn_to_call(String::from($str_to_conv))
         )
     }
@@ -560,36 +524,47 @@ Et maintenant le voyage au supermarché!
     }
 
     macro_rules! consumer_test {
-        ($input_value:expr, $buffer_res:expr, $input_remain:expr, $to_test:ident) => (
-            let mut buffer = String::new();
+        ($input_value:expr, $expected_result:expr, $input_remain:expr, $to_test:ident) => (
             let mut input = $input_value.chars().peekable();
-            buffer.push(input.next().unwrap());
-            $to_test(&mut input, &mut buffer);
-            assert_eq!(buffer, $buffer_res);
+            let head =input.next().unwrap();
+            let token = $to_test(&mut input, head);
+            assert_eq!(token, $expected_result);
+            assert_eq!(input.collect::<String>(), $input_remain);
+        );
+        (S, $input_value:expr, $expected_result:expr, $input_remain:expr, $to_test:ident) => (
+            let mut input = $input_value.chars().peekable();
+            input.next().unwrap();
+            let token = $to_test(&mut input);
+            assert_eq!(token, $expected_result);
             assert_eq!(input.collect::<String>(), $input_remain);
         )
     }
 
     #[test] fn test_consume_operator() {
-        consumer_test!( "+*--12", "+*--", "12", consume_operator);
-        consumer_test!( "<*| wow |*>", "<*|", " wow |*>", consume_operator);
+        use tokens::ElmToken::Operator;
+        consumer_test!( "+*--12", s!(Operator,"+*--"), "12", consume_operator);
+        consumer_test!( "<*| wow |*>", s!(Operator,"<*|"), " wow |*>", consume_operator);
     }
     #[test] fn test_consume_char() {
-        consumer_test!( r#"'\xfff' 10"#, r#"'\xfff"#, " 10", consume_char);
-        consumer_test!( r#"'\\' ten"#, r#"'\\"#, " ten", consume_char);
-        consumer_test!( r#"'\''''"#, r#"'\'"#, "''", consume_char);
+        use tokens::ElmToken::Char;
+        consumer_test!(S, r#"'\xfff' 10"#, s!(Char,r#"\xfff"#), " 10", consume_char);
+        consumer_test!(S, r#"'\\' ten"#, s!(Char,r#"\\"#), " ten", consume_char);
+        consumer_test!(S, r#"'\''''"#, s!(Char,r#"\'"#), "''", consume_char);
     }
     #[test] fn test_consume_number() {
-        consumer_test!( "0xabcd-10", "0xabcd", "-10", consume_number);
-        consumer_test!( "10e+34-10", "10e+34", "-10", consume_number);
-        consumer_test!( "3.1415-10", "3.1415", "-10", consume_number);
+        use tokens::ElmToken::Number;
+        consumer_test!( "0xabcd-10", s!(Number,"0xabcd"), "-10", consume_number);
+        consumer_test!( "10e+34-10", s!(Number,"10e+34"), "-10", consume_number);
+        consumer_test!( "3.1415-10", s!(Number,"3.1415"), "-10", consume_number);
     }
     #[test] fn test_consume_name() {
-        consumer_test!( "Some.test-10", "Some.test", "-10", consume_name);
-        consumer_test!( "Some.test-10", "Some.test", "-10", consume_name);
-        consumer_test!( "Some.Test.hello", "Some.Test.hello","", consume_name);
-        consumer_test!( ".hello", ".hello", "", consume_name);
-        consumer_test!( "model.hello", "model.hello", "", consume_name);
+        use tokens::ElmToken::{Name,Type};
+        consumer_test!( "Some.test-10", s!(Name,"Some.test"), "-10", consume_name);
+        consumer_test!( "type -10", Type, " -10", consume_name);
+        consumer_test!( "Some.test-10", s!(Name,"Some.test"), "-10", consume_name);
+        consumer_test!( "Some.Test.hello", s!(Name,"Some.Test.hello"),"", consume_name);
+        consumer_test!( ".hello", s!(Name,".hello"), "", consume_name);
+        consumer_test!( "model.hello", s!(Name,"model.hello"), "", consume_name);
     }
 
     macro_rules! block_test_boilerplate {
@@ -635,26 +610,5 @@ Et maintenant le voyage au supermarché!
             "ẑloat",
             "héllö {- hî-} wörld!ŵ\n"
         );
-    }
-
-    #[test] fn test_into_keyword1() {
-        let token = String::from("then");
-        assert_eq!(into_keyword(token), ElmToken::Then);
-    }
-    #[test] fn test_into_keyword2() {
-        let token = String::from("effect");
-        assert_eq!(into_keyword(token), ElmToken::Name(String::from("effect")));
-    }
-    #[test] fn test_into_keyword3() {
-        let token = String::from("<*|>");
-        assert_eq!(into_keyword(token), ElmToken::Operator(String::from("<*|>")));
-    }
-    #[test] #[should_panic] fn test_into_keyword4() {
-        let bad_token = String::from("");
-        into_keyword(bad_token);
-    }
-    #[test] #[should_panic] fn test_into_keyword5() {
-        let bad_token = String::from(" filter (+)");
-        into_keyword(bad_token);
     }
 }
