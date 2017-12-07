@@ -1,4 +1,7 @@
-#![feature(io)] extern crate elm_eureka;
+//! Pretty-prints the tokens created from lexing the elmjutsu-5k.elm file
+#![feature(io)]
+
+extern crate elm_eureka;
 
 use std::io::prelude::*;
 use std::io::BufReader;

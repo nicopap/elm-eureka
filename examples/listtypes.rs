@@ -1,4 +1,5 @@
-//! pretty-prints all the declared types in the
+//! Get a list of all the types in an elm source file and print them
+//! on stdout as a convoluted sentence.
 #![feature(io)]
 
 extern crate elm_eureka;

@@ -75,7 +75,7 @@ f x =
   let
       y = x * 3
       z = x + 92
-	in
+  in
       x + y + z
 -- Works (should)
 f x = let y = 10 in y * x
@@ -114,5 +114,5 @@ to execution, so be aware.
   <https://www.gnu.org/licenses/lgpl-3.0.html> for more informations.
 
 * I do not claim any copyrights over the files in "examples" directories. They
-	are trivial generic implementations with no claims of fitness for any
-	purpose.
+  are trivial generic implementations with no claims of fitness for any
+  purpose.

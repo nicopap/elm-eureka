@@ -12,17 +12,3 @@ type T10 v7 v8 v9
     | C2 { f7: T13 T14, f8: { f9 : T15, f10: T16 } } { f11: (T17, T18) }
     | C3 {} () (T19 T20)
     | C4 (T21 -> T22 -> (T23 -> T24) -> T25) (T26 -> (T27 -> T28))
-
-
-{-
-    TypeAlias {
-        name: R1,
-        type_variables: vec!["v1"],
-        type_ : Type::Record( Record {
-            variable_over : None,
-            fields : vec![
-                ("f1", Type::Function)
-                .. OMG TOO LONG BORING
-        })
-    }
--}

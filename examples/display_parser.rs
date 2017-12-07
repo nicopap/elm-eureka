@@ -1,4 +1,5 @@
-//! pretty-prints the parser tree for the elmjutsu-5k.elm file
+//! pretty-prints the parser tree for the elmjutsu-5k.elm file or
+//! the file given in argument.
 #![feature(io)]
 
 extern crate elm_eureka;

@@ -1,5 +1,6 @@
-//! Displays module doc and exported symbols of
-//! all elm source files in an elm project
+//! Prints on stdout a graphiz "dot" file that represents
+//! the dependency tree of the given project, showing only
+//! the projects modules.
 #![feature(io)]
 
 extern crate elm_eureka;
@@ -32,7 +33,7 @@ pub fn main() {
 
         for import in parser.imports() {
             let import_name : &String = &import.global_name;
-            if !sources.source_files.contains_key(import_name) {continue;}
+            if !sources.source_files.contains_key(import_name) {continue}
             let small_import_name = keywordify(import_name.clone());
             println!( "\t{} -> {};", small_import_name, small_name);
         }
