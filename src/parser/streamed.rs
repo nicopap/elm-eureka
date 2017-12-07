@@ -135,7 +135,9 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageModuleDeclr> {
                 .enumerate()
                 .map(|(i, token)| Ok((i, token, i+1)))
                 .collect::<Vec<_>>();
-        let module_declr = parse_ModuleDeclr(declr_stream).expect("Parsing Error");
+        let module_declr
+            = parse_ModuleDeclr(declr_stream)
+                .expect("Parsing error in module declaration");
         StreamParser {
             input : self.input,
             stage : StageModuleDoc{module_declr},
@@ -153,7 +155,7 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageModuleDoc> {
                     Some(DocComment(content)) => Some(content),
                     _ => None,
                 };
-                self.input.next().expect("Sourcefile with only doc and module declr");
+                self.input.next().unwrap(); //We `peek` eariler what this was
                 StreamParser {
                     input: self.input,
                     stage: StageImports{module_declr, module_doc},
@@ -182,7 +184,9 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageImports> {
                     .filter(not_match!(Newline(_,_)))
                     .enumerate()
                     .map(|(i, token)| Ok((i, token, i+1)));
-            let cur_import = parse_Import(import_stream).expect("Parsing Error");
+            let cur_import
+                = parse_Import(import_stream)
+                    .expect("Parsing error in imports");
             module_imports.push(cur_import);
         }
         let module_declr = self.stage.module_declr;
@@ -198,7 +202,7 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageImports> {
 impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageTopDeclrs> {
     fn next_step(mut self) -> StreamParser<I,StageEof> {
         // TODO: this is flawed because it doesn't capture lazily the
-        // tokens for a type declaration.
+        // tokens for function expression.
         let mut top_levels = Vec::new();
         loop {
             match self.input.peek() {
@@ -210,10 +214,11 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageTopDeclrs> {
                             .filter_indent()
                             .enumerate()
                             .map(|(i, token)| Ok((i, token, i+1)));
-                    top_levels.push(
-                        parse_TopDeclr(preparsed_tokens)
-                            .expect("Function Parsing Error")
-                    );
+                    let top_declaration
+                        = parse_TopDeclr(preparsed_tokens)
+                            .expect("Error in function (or function \
+                                    type) parsing");
+                    top_levels.push(top_declaration);
                 },
                 Some(_) => {
                     let toplevel_stream =
@@ -223,14 +228,12 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageTopDeclrs> {
                             .filter(not_match!(ElmToken::Newline(_,_)))
                             .enumerate()
                             .map(|(i, token)| Ok((i, token, i+1)));
-                    top_levels.push(
-                        parse_TopDeclr(toplevel_stream)
-                            .expect("Parsing Error")
-                    );
+                    let top_declaration
+                        = parse_TopDeclr(toplevel_stream)
+                            .expect("Error while parsing a type declaration");
+                    top_levels.push(top_declaration);
                 },
-                None  => {
-                    break;
-                },
+                None => break,
             }
         }
         let module_declr = self.stage.module_declr;
@@ -256,6 +259,9 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageTopDeclrs> {
     // Keeping track of them helps telling where to insert the `endcase`
     // tokens.
     Delimiter,
+    // Something that should never be put in the stack, to indicate
+    // we want to reach the bottom of the stack
+    Bottom,
 }
 
 impl fmt::Debug for IndentEntry {
@@ -264,6 +270,7 @@ impl fmt::Debug for IndentEntry {
             IndentEntry::Let(indent) => write!(f, "l{}", indent),
             IndentEntry::Case(indent) => write!(f, "c{}", indent),
             IndentEntry::Delimiter => write!(f, "del"),
+            IndentEntry::Bottom => write!(f, "_|_"),
         }
     }
 }
@@ -279,9 +286,8 @@ impl fmt::Debug for IndentEntry {
 /// keeps track of what "meaningfull" indentation lines to look for, but
 /// also of enclosing delimiters such as `()`, `[]` or `{}`. This is so
 /// we do not insert `endcase` tokens at the wrong place.
-#[derive(Debug)]
 struct FilterIndent<I:Iterator<Item=ElmToken>> {
-    input: I,
+    input: Peekable<I>,
     // Holds information about the levels of indentation we are in, and
     // if there is "enclosing" expressions that renders `Of` ending moot.
     indent_stack: Vec<IndentEntry>,
@@ -290,6 +296,7 @@ struct FilterIndent<I:Iterator<Item=ElmToken>> {
     indent_trigger: Option<IndentTrigger>,
     // A buffer to hold multiple tokens we want to emit later.
     buffer_stack: Vec<ElmToken>,
+    let_alignement: Option<i16>,
 }
 
 impl<I:Iterator<Item=ElmToken>> FilterIndent<I> {
@@ -301,6 +308,9 @@ impl<I:Iterator<Item=ElmToken>> FilterIndent<I> {
     // This follows the grammatical rules of only closing `case` expressions
     // with an `endcase` if the `case` are nested or nested within open
     // expressions.
+    //
+    // ## Notes
+    // If the entry is not in the stack, the whole stack will be popped
     fn pop_indents_to(&mut self, entry: IndentEntry) {
         let mut last_indenter_is_case = false;
         loop { match self.indent_stack.pop() {
@@ -381,56 +391,90 @@ impl<I:Iterator<Item=ElmToken>> FilterIndent<I> {
     }
 }
 
+impl<I:Iterator<Item=ElmToken>> fmt::Debug for FilterIndent<I> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let &FilterIndent{
+            ref indent_stack,
+            ref indent_trigger,
+            ref buffer_stack, ..} = self;
+        write!(f, "FilterIndent {{input:Iterator<Item=ElmToken>, \
+                indent_stack: {:?},\
+                indent_trigger: {:?},\
+                buffer_stack: {:?} }}", indent_stack, indent_trigger,
+                buffer_stack)
+    }
+}
+
 impl<I:Iterator<Item=ElmToken>> Iterator for FilterIndent<I> {
     type Item=ElmToken;
-    // TODO: keep track of location after the `let` keyword if
-    // the next Token doesn't start at a new line
     fn next(&mut self) -> Option<ElmToken> {
         use self::ElmToken::*;
+        use self::IndentTrigger as IT;
+        use self::IndentEntry as IE;
 
         if let Some(token) = self.buffer_stack.pop() { return Some(token) }
-        match self.input.next()? { token => match token {
+        let let_alignement = self.let_alignement.take();
+
+        match self.input.next() {
+            Some(token) => match token {
             LParens | LBrace | LBracket | If => {
-                self.indent_stack.push(IndentEntry::Delimiter);
+                self.indent_stack.push(IE::Delimiter);
                 return Some(token);
             },
             Let => {
-                self.indent_trigger = Some(IndentTrigger::Let);
-                self.indent_stack.push(IndentEntry::Delimiter);
+                self.indent_trigger = Some(IT::Let);
+                self.indent_stack.push(IE::Delimiter);
+                match self.input.peek() {
+                    Some(&Newline(_,_)) => {},
+                    Some(_) => if let Some(alignement) = let_alignement {
+                        self.indent_stack.push(IE::Let(alignement));
+                        self.indent_trigger = None;
+                    },
+                    None => {},
+                };
                 return Some(Let);
             },
             Of => {
-                self.indent_trigger = Some(IndentTrigger::Of);
+                self.indent_trigger = Some(IT::Of);
                 return Some(Of);
             },
             RParens | RBrace | RBracket | Else => {
                 self.buffer_stack.push(token);
-                self.pop_indents_to(IndentEntry::Delimiter);
+                self.pop_indents_to(IE::Delimiter);
             },
             In => {
                 self.indent_trigger = None;
                 self.buffer_stack.push(In);
-                self.pop_indents_to(IndentEntry::Delimiter);
+                self.pop_indents_to(IE::Delimiter);
             },
             Newline(_, column) => {
+                if let Some(&Let) = self.input.peek() {
+                    self.let_alignement = Some(column + 4)
+                };
                 match self.indent_trigger {
-                    Some(IndentTrigger::Let) => {
+                    Some(IT::Let) => {
                         self.indent_trigger = None;
-                        self.indent_stack.push(IndentEntry::Let(column));
+                        self.indent_stack.push(IE::Let(column));
                     },
-                    Some(IndentTrigger::Of) => {
+                    Some(IT::Of) => {
                         self.indent_trigger = None;
-                        self.indent_stack.push(IndentEntry::Case(column));
+                        self.indent_stack.push(IE::Case(column));
                     },
-                    None => {
-                        self.locate_indent(column);
+                    None => match self.input.peek() {
+                        Some(&Operator(_)) => {},
+                        _ => self.locate_indent(column),
                     },
                 }
             },
-            any_other => {
-                return Some(any_other);
+            any_other => return Some(any_other),
             },
-        } }
+            None if !self.indent_stack.is_empty() =>
+                // End of input, need to wrap up
+                // Calling pop_indents_to with the instruction of popping the
+                // whole stack
+                self.pop_indents_to(IE::Bottom),
+            None => return None,
+        }
         // if the match expression didn't return, we fall through to a
         // recursive call to self. Note that this is definitively equivalent
         // to a while loop.
@@ -441,10 +485,11 @@ impl<I:Iterator<Item=ElmToken>> Iterator for FilterIndent<I> {
 trait TokenIterator: Iterator<Item=ElmToken> {
     fn filter_indent(self) -> FilterIndent<Self> where Self: Sized {
         FilterIndent {
-            input : self,
+            input : self.peekable(),
             indent_stack : Vec::new(),
             indent_trigger : None,
             buffer_stack: Vec::new(),
+            let_alignement: None,
         }
     }
 }
@@ -455,8 +500,9 @@ fn into_tree(parser: StageEof) -> tree::ElmModule {
     let tree::ModuleDeclr {name, exports} = module_declr;
     let doc = module_doc;
     let imports = module_imports;
-    let (list_ports, infixities, functions, types) =
-        tree::into_tree(top_levels.into_iter());
+    let (list_ports, infixities, functions, types)
+        = tree::into_tree(top_levels.into_iter());
+
     let ports = if list_ports.is_empty() { None } else { Some(list_ports) };
     tree::ElmModule {
         name,

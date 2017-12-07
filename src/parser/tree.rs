@@ -8,8 +8,6 @@
 //! the construction of the global parse tree (ElmModule)
 
 
-use either::Either;
-
 pub type Name=String;
 pub type Operator=String;
 
@@ -175,7 +173,7 @@ pub enum Expression {
     EmptyRecord,
     EmptyList,
     IfThenElse(Box<Expression>, Box<Expression>, Box<Expression>),
-    LetIn(Vec<Either<LetDeclaration,LetBind>>, Box<Expression>),
+    LetIn(Vec<LetDeclaration>, Box<Expression>),
     CaseOf(Box<Expression>, Vec<(Pattern, Expression)>),
     Lambda(Vec<Pattern>, Box<Expression>),
     InfixApplication(Vec<(Expression, Operator)>, Box<Expression>),
@@ -189,15 +187,9 @@ pub enum Expression {
 #[derive(Debug,Clone)]
 pub struct LetDeclaration {
     pub annotation: Option<Type>,
-    pub name: Name,
+    pub name: Option<Name>,
     pub arguments: Vec<Pattern>,
     pub body: Expression,
-}
-
-#[derive(Debug,Clone)]
-pub struct LetBind {
-    pub pattern: Pattern,
-    pub body: Expression
 }
 
 #[derive(Debug,Clone)]

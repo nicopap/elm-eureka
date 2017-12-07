@@ -1,8 +1,5 @@
 use std::str::FromStr;
 
-use either::Either;
-use either::Either::{Left,Right};
-
 use tokens;
 use super::tree;
 use self::tree::{
@@ -14,7 +11,6 @@ use self::tree::{
     ModuleDeclr,
     OperPriority,
     LetDeclaration,
-    LetBind,
     Pattern,
     Type,
     TypeAlias,
@@ -189,18 +185,22 @@ EnclosedType: Type = {
 };
 
 Pattern: Pattern = {
+    <entries:(<AppliPattern> OperatorTok)+> <last:AppliPattern> => {
+        let mut entries = entries;
+        entries.push(last);
+        Pattern::Decons(entries)
+    },
+
+    AppliPattern => <>,
+};
+
+AppliPattern: Pattern = {
     <name:NameTok> <arguments:EnclosedPattern+> => {
         if name.chars().nth(0).map(|x| x.is_uppercase()) == Some(true) {
             Pattern::ArgConstructor(name, arguments)
         } else {
             panic!("A bind located at the place of constructor")
         }
-    },
-
-    <entries:(<EnclosedPattern> OperatorTok)+> <last:EnclosedPattern> => {
-        let mut entries = entries;
-        entries.push(last);
-        Pattern::Decons(entries)
     },
 
     EnclosedPattern => <>,
@@ -351,7 +351,7 @@ ClosedExpression: Expression = {
     NameTok => Expression::Variable(<>),
 };
 
-LetDeclaration: Either<LetDeclaration,LetBind> = {
+LetDeclaration: LetDeclaration = {
     <annotation:(<NameTok> ":" <Type> "let indent")?>
     <name:NameTok> <arguments:EnclosedPattern+> "=" <body:Expression> => {
         match annotation {
@@ -361,16 +361,17 @@ LetDeclaration: Either<LetDeclaration,LetBind> = {
                            match the function declaration it is annotating")
                 }
                 let annotation = Some(maybe_annotation);
-                Left(LetDeclaration{annotation, name, arguments, body})
+                LetDeclaration{annotation, name:Some(name), arguments, body}
             },
             None => {
-                Left(LetDeclaration{annotation:None, name, arguments, body})
+                LetDeclaration{annotation:None, name:Some(name), arguments, body}
             },
         }
     },
 
+    <annotation:(NameTok ":" <Type> "let indent")?>
     <pattern:EnclosedPattern> "=" <body:Expression> =>
-        Right(LetBind{<>}),
+        LetDeclaration{annotation, body, arguments:vec![pattern], name:None},
 };
 
 Comma<T>: Vec<T> = {

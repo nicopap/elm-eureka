@@ -206,3 +206,33 @@ ident_7 =
     case expr_111 of
         ptrn_23 :: ptrn_24 ->
             expr_112
+
+
+-- You can start something on the "ident line" if it is an operator
+ident_8 =
+    case expr_1 of
+        ptrn_1 -> expr_2
+        ++ expr_3
+        ptrn_2 -> expr_4
+
+
+-- Alignement after `let` when `let` is the first token on the line
+ident_9 =
+    let ident_2 = expr_1
+        ident_3 = expr_2
+    in expr_3
+
+
+
+-- infix `-` without whitespace after (bonus for float notation)
+ident_10 = name-1e-10
+
+-- prefix negation.
+ident_11 = -10
+
+-- Proper handling of alignement after `let`
+-- (not intended to work)
+-- ident_12 = let ident_2 = expr_1
+--               ident_3 = expr_2
+--           in expr_3
+

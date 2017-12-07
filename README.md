@@ -34,8 +34,8 @@ parse any expression.
 
 ## Planned (maybe?)
 
-* An efficient parser capable of building an elm AST lazily. (Currently, it
-  parses everything if anything else than the imports, exports and module
+* An efficient parser capable of building an elm AST semi-lazily. (Currently,
+  it parses everything if anything else than the imports, exports and module
   docs are needed)
 
 * Proper line location tracking, so you can retreive the location of the
@@ -54,9 +54,17 @@ parse any expression.
 
 ## Limitations
 
-* Aligned indentation after `let` keyword **do not work**. If you are thourugh
-  about using elm-format, this shouldn't be an issue.  example:
+* This is not the official elm compiler and the parser is homebrew rather
+  than taked from source (Rust and Haskell are two different languages with
+  very different limitations that leads to verify different implementations)
 
+* This means that there will be some edge cases where `elm-make` accepts
+  a program and elm-eureka do not (and vis-versa). An example of such case is
+  aligned expressions such as `case` and `let`. elm-eureka will typically not
+  accept aligned branches if the first one is on the same line as the `let` or
+  `case` keyword.
+
+example:
 ```elm
 -- Does not work (should work)
 f x = let y = x * 3
@@ -71,28 +79,34 @@ f x =
       x + y + z
 -- Works (should)
 f x = let y = 10 in y * x
+
+-- Works (should)
+f x =
+  let x = 10
+      y = 20
+  in x + y
 ```
 
-* This is also true for `case` pattern branches.
+* As you can see, I try my best at accepting *some* of the edge cases.
 
 * Prefix `-`. The weird semantic makes it hard to integrate in a lexer:
   * If preceeding without whitespace a word or opening parenthesis, and there
     is no words preceeding the `-` without whitespace, it is a prefix `-`.
   * Otherwise it is the `-` operator.
+  * The current parser's grammar do not handle prefix `-`, instead I do
+    some hardcoding at the lexing phase. Proper handling of prefix `-` is
+    planned.
 
 * Shader literals and multiline string literals are not yet handled properly.
 
-* I handle indentation in a different maner than the official elm-compiler
-  parser: instead of checking alignement within the parser, I execute a
-  "preparse" phase in which I insert closing delimiters **only when case
-  branches can be ambiguous** (nested `case`).
-  I have concidered encoding into the type of the expression the level of
-  indentation using Peano numbers, but I found this was a bit too *fancy*. If
-  anyone has the guts to do that and show me code readability and performance
-  improvements, I'm all hear.
-  The upside is that the semantics should wind up being the same as keeping
-  track of the indentation level. However, we may have a slower parser as a
-  result.
+## Usage
+
+Please see the "examples" directory for usage examples.
+
+## Stability
+
+I'm still working on the API. I have API change plans that I still didn't put
+to execution, so be aware.
 
 ## License(s)
 

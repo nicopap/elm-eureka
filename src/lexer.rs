@@ -27,10 +27,6 @@
 use std::iter::Peekable;
 use tokens::ElmToken;
 
-macro_rules! to_str {
-    ( $char_ident:ident ) => ( format!("{}", $char_ident) )
-}
-
 macro_rules! first_char {
     ($string:ident) => (
         $string.chars().nth(0).unwrap()
@@ -98,6 +94,7 @@ fn into_keyword(text_token : String) -> ElmToken {
         "type" => return ElmToken::Type,
         "infixr" => return ElmToken::Infixr,
         "infixl" => return ElmToken::Infixl,
+        "infix" => return ElmToken::Infixl, //infix implies infixl
         "port" => return ElmToken::Port,
         "where" => return ElmToken::Where,
         "let" => return ElmToken::Let,
@@ -108,8 +105,6 @@ fn into_keyword(text_token : String) -> ElmToken {
         ElmToken::Operator(text_token)
     } else if first_char!(text_token).is_alphabetic() {
         ElmToken::Name(text_token)
-    } else if first_char!(text_token).is_digit(10) {
-        ElmToken::Number(text_token)
     } else {
         panic!(format!("#{}# was not a recognizable token!", text_token))
     }
@@ -234,7 +229,7 @@ fn consume_number<I>(input: &mut Peekable<I>, into: &mut String)
 {
     let is_hexa = match input.peek() { Some(&'x') => true, _ => false };
     if is_hexa {
-        into.push(input.next().expect("Lexing an hexadecimal number"));
+        into.push(input.next().unwrap());
         consume_into(input, into, |c| c.is_digit(16))
     } else {
         let mut radix = false;
@@ -332,8 +327,9 @@ fn consume_newline<I>(input: &mut Peekable<I>, line: i16)
 /// before processing, or you could defer up to the
 /// last moment the evaluation of tokens.
 pub struct Lexer<I: Iterator<Item=char>> {
-    input : Peekable<I>,
-    line_loc : i16,
+    input: Peekable<I>,
+    line_loc: i16,
+    last_white: bool,
 }
 
 /// Implements the ability to convert a character stream
@@ -353,6 +349,7 @@ pub trait LexableIterator: Iterator<Item=char> {
         Lexer {
             input: self.peekable(),
             line_loc: 1,
+            last_white: false,
         }
     }
 }
@@ -407,20 +404,32 @@ impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
     /// The stream may terminate early for
     /// undeterminate reasons, mostly broken code
     fn next(&mut self) -> Option<ElmToken> {
-        { let input = &mut self.input; match input.next()? {
+        let old_white = self.last_white;
+        self.last_white = false;
+
+        { let input = &mut self.input;
+        macro_rules! bufftoken {
+            ($init:expr, $consumer:ident, $builder:expr) => ( {
+                let mut into_buffer = String::new();
+                into_buffer.push($init);
+                $consumer(input, &mut into_buffer);
+                return Some($builder(into_buffer))
+            } )
+        }; match input.next()? {
             '\r' => {},
             '\n' => {
                 let (token, nl_consumed) =
                     consume_newline(input, self.line_loc + 1);
                 self.line_loc += nl_consumed + 1;
+                self.last_white = true;
                 return token
             },
-            c if c.is_whitespace() => {},
-            '[' => { return Some(ElmToken::LBracket) },
-            ']' => { return Some(ElmToken::RBracket) },
-            '(' => { return Some(ElmToken::LParens) },
-            ')' => { return Some(ElmToken::RParens) },
-            ',' => { return Some(ElmToken::Comma) },
+            c if c.is_whitespace() => self.last_white = true,
+            '[' => return Some(ElmToken::LBracket),
+            ']' => return Some(ElmToken::RBracket),
+            '(' => return Some(ElmToken::LParens),
+            ')' => return Some(ElmToken::RParens),
+            ',' => return Some(ElmToken::Comma),
             '{' => {
                 if input.peek().map_or(false, |&c| c == '-') {
                     match consume_block_comment(input) {
@@ -430,37 +439,35 @@ impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
                         },
                         (None, nl_consumed) => self.line_loc += nl_consumed,
                     }
-                } else {
-                    return Some(ElmToken::LBrace)
-                }
+                } else { return Some(ElmToken::LBrace) }
             },
-            '}' => { return Some(ElmToken::RBrace) },
-            '.' => {
-                if input.peek().map_or(false, |&c| is_operator(c)) {
-                    let mut into_buffer = String::from(".");
-                    consume_operator(input, &mut into_buffer);
-                    return Some(into_keyword(into_buffer))
-                } else if input.peek().map_or(false, |&c| c.is_alphabetic()) {
-                    let mut into_buffer = String::from(".");
-                    consume_name(input, &mut into_buffer);
-                    return Some(ElmToken::Name(into_buffer))
-                }
+            '}' => return Some(ElmToken::RBrace),
+            '.' => match input.peek() {
+                Some(&c) if is_operator(c) =>
+                    bufftoken!('.', consume_operator, into_keyword),
+                Some(&c) if c.is_alphabetic() =>
+                    bufftoken!('.', consume_name, ElmToken::Name),
+                _ => unreachable!(),
             },
-            c if is_operator(c) => {
-                if c == '-' && input.peek().map_or(false, |&c| c == '-') {
-                    consume_line_comment(input);
-                } else {
-                    let mut into_buffer : String = to_str!(c);
-                    consume_operator(input, &mut into_buffer);
-                    return Some(into_keyword(into_buffer));
-                }
+            '-' => match input.peek() {
+                    Some(&'-') => consume_line_comment(input),
+                    Some(&c) if is_operator(c) =>
+                        bufftoken!('-', consume_operator, into_keyword),
+                    Some(_) if !old_white =>
+                        return Some(ElmToken::Operator(String::from("-"))),
+                    Some(&c) if c.is_digit(10) =>
+                        //FIXME: add proper handling for prefix '-' (requires
+                        //patching the expression grammar). Currently,
+                        //valid constructs such as 10 -(3 * 3) will blow up
+                        bufftoken!('-', consume_number, ElmToken::Number),
+                    Some(_) =>
+                        return Some(ElmToken::Operator(String::from("-"))),
+                    None => unreachable!(),
             },
-            c if c.is_alphabetic() => {
-                let mut into_buffer : String = to_str!(c);
-                consume_name(input, &mut into_buffer);
-                return Some(into_keyword(into_buffer))
-            },
-            '_' => { return Some(ElmToken::Underscore) },
+            c if is_operator(c) => bufftoken!(c,consume_operator,into_keyword),
+            c if c.is_alphabetic() => bufftoken!(c,consume_name,into_keyword),
+            c @ '0' ... '9' => bufftoken!(c, consume_number, ElmToken::Number),
+            '_' => return Some(ElmToken::Underscore),
             '"' => {
                 let mut into_buffer = String::new();
                 let nl_consumed = consume_string(input, &mut into_buffer);
@@ -471,11 +478,6 @@ impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
                 let mut into_buffer = String::new();
                 consume_char(input, &mut into_buffer);
                 return Some(ElmToken::Char(into_buffer));
-            },
-            c @ '0' ... '9' => {
-                let mut into_buffer : String = to_str!(c);
-                consume_number(input, &mut into_buffer);
-                return Some(into_keyword(into_buffer))
             },
             c => {
                 println!("######{}#####", c);
@@ -516,7 +518,6 @@ main =
 
     #[test] fn test_lexer() {
         use tokens::ElmToken::*;
-
         let str_input = String::from(UNORDERED_LIST_EXAMPLE);
         let lexer = str_input.chars().lex();
         let token_vec = lexer.collect::<Vec<_>>();
@@ -543,6 +544,21 @@ Et maintenant le voyage au supermarché!
             LBracket, s!(Name,"text"), s!(StringLit,"Bœuf"), RBracket,
             Newline(15,4), RBracket, Newline(18,0)]);
     }
+
+    // IMPORTANT NOTE: This test in very limited, there is a lot of ways to
+    // invalidate the number lexer (notably `-0x499`), but this is not
+    // an issue until I decide it is.
+    #[test] fn number_lexing() {
+        use tokens::ElmToken::*;
+        let src = String::from("name-10e-10 10-10 10e+99 0x1e+99 0xabcd --0x449");
+        let tknzd = src.chars().lex().collect::<Vec<_>>();
+        assert_eq!(tknzd, vec![
+            s!(Name,"name"), s!(Operator,"-"), s!(Number,"10e-10"),
+            s!(Number,"10"), s!(Operator,"-"), s!(Number,"10"),
+            s!(Number,"10e+99"), s!(Number,"0x1e"), s!(Operator,"+"),
+            s!(Number,"99"), s!(Number,"0xabcd") ]);
+    }
+
     macro_rules! consumer_test {
         ($input_value:expr, $buffer_res:expr, $input_remain:expr, $to_test:ident) => (
             let mut buffer = String::new();
@@ -553,6 +569,7 @@ Et maintenant le voyage au supermarché!
             assert_eq!(input.collect::<String>(), $input_remain);
         )
     }
+
     #[test] fn test_consume_operator() {
         consumer_test!( "+*--12", "+*--", "12", consume_operator);
         consumer_test!( "<*| wow |*>", "<*|", " wow |*>", consume_operator);
