@@ -119,6 +119,7 @@
 extern crate serde_json;
 extern crate itertools;
 extern crate walkdir;
+#[cfg(test)] #[macro_use] extern crate pretty_assertions;
 
 pub mod packages_reader;
 mod tokens;
