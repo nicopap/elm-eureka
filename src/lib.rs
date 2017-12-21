@@ -123,6 +123,7 @@ extern crate walkdir;
 
 pub mod packages_reader;
 mod tokens;
+mod position;
 pub mod lexer;
 pub mod parser;
 pub use tokens::ElmToken;

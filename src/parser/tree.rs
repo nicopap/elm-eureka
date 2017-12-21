@@ -7,9 +7,9 @@
 //! I intend to only export the types that enter into
 //! the construction of the global parse tree (ElmModule)
 
-
-pub type Name=String;
-pub type Operator=String;
+pub type Location = i16;
+pub type Name = String;
+pub type Operator = String;
 
 #[derive(Debug,Clone)]
 pub enum ExportList {
@@ -36,18 +36,19 @@ pub struct ElmImport {
     pub global_name: Name,
     pub local_name: Option<Name>,
     pub exposes: Option<ExportList>,
+    pub location: i16,
 }
 
 #[derive(Debug,Clone)]
 pub enum TopDeclr {
     OperPriority(OperPriority),
     DocString(String),
-    TypeDeclr(TypeDeclr),
-    TypeAlias(TypeAlias),
-    FunctionAnnotation(bool, Name, Type),
+    TypeDeclr(Location, TypeDeclr),
+    TypeAlias(Location, TypeAlias),
+    FunctionAnnotation(Location, bool, Name, Type),
     OperatorAnnotation(Name, Type),
-    FunctionDeclr(Name, Vec<Pattern>, Expression),
-    OperatorDeclr(Name, Vec<Pattern>, Expression),
+    FunctionDeclr(Location, Name, Vec<Pattern>, Expression),
+    OperatorDeclr(Location, Name, Vec<Pattern>, Expression),
 }
 
 #[derive(Debug,Clone)]
@@ -63,7 +64,8 @@ pub struct FunctionDeclaration {
     pub name: Name,
     pub kind: FunctionKind,
     pub arguments: Vec<Pattern>,
-    pub body: Expression
+    body: Expression,
+    location: i16,
 }
 
 #[derive(Debug,Clone)]
@@ -71,6 +73,7 @@ pub struct PortDeclaration {
     pub annotation: Type,
     pub doc: Option<String>,
     pub name: Name,
+    location: i16,
 }
 
 #[derive(Debug,Clone)]
@@ -102,6 +105,7 @@ pub struct TypeDeclaration {
     pub type_variables: Vec<Name>,
     pub genre: TypeGenre,
     pub doc: Option<String>,
+    location: i16,
 }
 
 #[derive(Debug,Clone)]
@@ -225,50 +229,44 @@ pub fn into_tree<I:Iterator<Item=TopDeclr> + Sized>(declrs : I)
         TD::DocString(content) => {
             last_docstring = Some(content);
         },
-        TD::TypeDeclr(TypeDeclr{name, type_variables, alternatives}) => {
+        TD::TypeDeclr(location,TypeDeclr{name,type_variables,alternatives}) =>{
             let doc = last_docstring.take();
             let genre = TypeGenre::Full(alternatives);
-            types.push(TypeDeclaration {name, type_variables, genre, doc})
+            types.push(TypeDeclaration {
+                name, type_variables, genre, doc, location
+            })
         },
-        TD::TypeAlias(TypeAlias{name, type_, type_variables}) => {
+        TD::TypeAlias(location, TypeAlias{name, type_, type_variables}) => {
             let doc = last_docstring.take();
             let genre = TypeGenre::Alias(type_);
-            types.push(TypeDeclaration {name, type_variables, genre, doc})
+            types.push(TypeDeclaration {
+                name, type_variables, genre, doc, location
+            })
         },
-        TD::FunctionAnnotation(true, name, annotation) => {
+        TD::FunctionAnnotation(location, true, name, annotation) => {
             let doc = last_docstring.take();
-            ports.push(PortDeclaration {doc, name, annotation})
+            ports.push(PortDeclaration {doc, name, annotation, location})
         },
-        TD::FunctionAnnotation(false, _, type_) => {
+        TD::FunctionAnnotation(_, false, _, type_) => {
             last_annotation = Some(type_);
         },
         TD::OperatorAnnotation(_, type_) => {
             last_annotation = Some(type_);
         },
-        TD::FunctionDeclr(name, arguments, body) => {
+        TD::FunctionDeclr(location, name, arguments, body) => {
             let doc = last_docstring.take();
             let kind = FunctionKind::Regular;
             let annotation = last_annotation.take();
             functions.push(FunctionDeclaration {
-                annotation,
-                doc,
-                name,
-                kind,
-                arguments,
-                body
+                annotation, doc, name, kind, arguments, location, body,
             })
         },
-        TD::OperatorDeclr(name, arguments, body) => {
+        TD::OperatorDeclr(location, name, arguments, body) => {
             let doc = last_docstring.take();
             let kind = FunctionKind::Operator;
             let annotation = last_annotation.take();
             functions.push(FunctionDeclaration {
-                annotation,
-                doc,
-                name,
-                kind,
-                arguments,
-                body
+                annotation, doc, name, kind, arguments, location, body,
             })
         },
     } }

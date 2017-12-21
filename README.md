@@ -99,6 +99,10 @@ f x =
 
 * Shader literals and multiline string literals are not yet handled properly.
 
+* No fine-grained location tracking. This means that at best elm-eureka
+  provides informations at the line level.
+
+
 ## Usage
 
 Please see the "examples" directory for usage examples.

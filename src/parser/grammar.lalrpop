@@ -47,14 +47,14 @@ ExportEntry: ExportEntry = {
 };
 
 pub Import: ElmImport = {
-    "import" <global_name:NameTok>
+    <location:"\n"> "import" <global_name:NameTok>
     <local_name:("as" <NameTok>)?>
     <exposes:("exposing" <ExportList>)?> =>
         ElmImport{ <> },
 };
 
 pub TopDeclr: TopDeclr = {
-    "infixr" <priority:NumberTok> <operator:OperatorTok> =>
+    "\n" "infixr" <priority:NumberTok> <operator:OperatorTok> =>
         TopDeclr::OperPriority(OperPriority {
             associativity: Associativity::Right,
             priority:
@@ -63,7 +63,7 @@ pub TopDeclr: TopDeclr = {
             operator : operator,
         }),
 
-    "infixl" <priority:NumberTok> <operator:OperatorTok> =>
+    "\n" "infixl" <priority:NumberTok> <operator:OperatorTok> =>
         TopDeclr::OperPriority(OperPriority {
             associativity: Associativity::Left,
             priority:
@@ -76,30 +76,32 @@ pub TopDeclr: TopDeclr = {
             operator : operator,
         }),
 
+    <loc:"\n">
     "type" <name:NameTok> <type_variables:NameTok*> "="
     <first_alt:(<NameTok> <EnclosedType*>)>
     <next_alts:("|"<NameTok> <EnclosedType*>)*> => {
         let mut alternatives : Vec<(String, Vec<Type>)> = next_alts;
         alternatives.insert(0,first_alt);
-        TopDeclr::TypeDeclr(TypeDeclr{name,type_variables,alternatives})
+        TopDeclr::TypeDeclr(loc, TypeDeclr{name,type_variables,alternatives})
     },
 
+    <loc:"\n">
     "type" "alias" <name:NameTok> <type_variables:NameTok*> "=" <type_:Type> =>
-        TopDeclr::TypeAlias(TypeAlias{<>}),
+        TopDeclr::TypeAlias(loc, TypeAlias{name, type_variables, type_}),
 
-    "(" <OperatorTok> ")" <EnclosedPattern*> "=" <Expression> =>
+    <"\n"> "(" <OperatorTok> ")" <EnclosedPattern*> "=" <Expression> =>
         TopDeclr::OperatorDeclr(<>),
 
-    <p:"port"?> <name:NameTok> ":" <type_:Type> =>
-        TopDeclr::FunctionAnnotation(p.is_some(), name,  type_),
+    <loc:"\n"> <p:"port"?> <name:NameTok> ":" <type_:Type> =>
+        TopDeclr::FunctionAnnotation(loc, p.is_some(), name,  type_),
 
-    "(" <OperatorTok> ")" ":" <Type> =>
+    "\n" "(" <OperatorTok> ")" ":" <Type> =>
         TopDeclr::OperatorAnnotation(<>),
 
-    <NameTok> <EnclosedPattern*> "=" <Expression> =>
+    <"\n"> <NameTok> <EnclosedPattern*> "=" <Expression> =>
         TopDeclr::FunctionDeclr(<>),
 
-    DocCommentTok => TopDeclr::DocString(<>),
+    "\n" <DocCommentTok> => TopDeclr::DocString(<>),
 };
 
 TokenList: tokens::ElmToken = {
@@ -387,7 +389,7 @@ extern {
     type Error = tokens::LexError;
 
     enum tokens::ElmToken {
-        NewlineTok => tokens::ElmToken::Newline(<i16>,<i16>),
+        "\n" => tokens::ElmToken::Newline(<i16>,i16),
         "(" => tokens::ElmToken::LParens,
         ")" => tokens::ElmToken::RParens,
         "," => tokens::ElmToken::Comma,
@@ -427,7 +429,7 @@ extern {
         CharTok => tokens::ElmToken::Char(<String>),
         "case indent" => tokens::ElmToken::CaseIndent,
         "let indent" => tokens::ElmToken::LetIndent,
-        "endcase" => tokens::ElmToken::Endcase, // Dying of calling it "esac"
+        "endcase" => tokens::ElmToken::Endcase,
     }
 }
 

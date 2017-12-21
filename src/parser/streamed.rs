@@ -3,13 +3,14 @@ use std::iter::{Peekable,SkipWhile};
 use std::fmt;
 use std::mem::replace;
 
-use itertools::{Coalesce,Itertools};
+use itertools::{multipeek,MultiPeek,Coalesce,Itertools};
+use ::position::Iterplus;
 
 use super::grammar::{parse_ModuleDeclr,parse_Import, parse_TopDeclr};
 use super::tree;
 use ::tokens::ElmToken;
 use ::lexer::{LexableIterator,Lexer};
-use self::ElmToken::{DocComment, Newline, Name, LParens, Port};
+use self::ElmToken::{DocComment, Newline, Name};
 
 macro_rules! not_match {
     ($to_match:pat) => ( |x| match *x { $to_match => false, _ => true })
@@ -18,12 +19,59 @@ macro_rules! is_match {
     ($to_match:pat) => ( |x| match x { $to_match => true, _ => false })
 }
 
-// type SpanToken = Result<(usize, ElmToken, usize), LexError>;
+// NOTE: I use `appart_first_take` to keep the newline token at the beginning
+// of the parser input, so it can be used for location tracking.
+// This is so the TopDeclr parser can use the line information.
+// There is multiple alternate implementations I concidered such as:
+// * in `StageTopDeclrs`, pop the leading Newline of top declarations, use
+//   it with the result of the old parser
+//   * Needs refactoring the `StageTopDeclr` `next_step` function, must
+//     adapt the `tree::TopDeclr` to accomodate for both the parser and the
+//     "post-parser" modification of the data type.
+//   * Needs to setup somehow the first Newline.
+// * Add location tracking directly to the tokens (how every parsing libraries
+//   does it)
+//   * Attempted once, and gave up.
+//
+// The current solution has the advantage of being light on the line and logic
+// changes necessary to update the code.
+// Although, it might not  be the best in terms of performances.
+macro_rules! as_token_span {
+    ($input:expr, filter_newlines) => (
+        $input
+            .by_ref()
+            .appart_first_take(not_match!(Newline(_,0)))
+            .filter(|x| match *x {Newline(_,x) if x != 0 => false, _ => true})
+            .enumerate()
+            .map(|(i, token)| Ok((i, token, i+1)))
+    );
+    ($input:expr, filter_indent) => (
+        $input
+            .by_ref()
+            .appart_first_take(not_match!(Newline(_,0)))
+            .filter_indent()
+            .enumerate()
+            .map(|(i, token)| Ok((i, token, i+1)))
+    )
+}
+
+// Look ahead in input two times, see what the token is, acts accordingly
+// (if it is the one we expect, we $iffound, otherwise we $iflost)
+macro_rules! ifahead2 {
+    (($input:expr => $pred:pat) $iffound:block  else  $iffalse:block ) => ({
+        $input.reset_peek();
+        $input.peek();
+        match $input.peek() {
+            Some($pred) => { $input.reset_peek(); $iffound },
+            _           => { $input.reset_peek(); $iffalse },
+        }
+    })
+}
 
 // wrappers to deal with lazy input stream reification.
 type CoalSig<X> = fn(X, X)->Result<X, (X,X)>;
-type OMG<I>=Peekable<Coalesce<
-    SkipWhile< I,for<'r> fn(&'r ElmToken)->bool >,
+type OMG<I>=MultiPeek<Coalesce<
+    SkipWhile<I, for<'r> fn(&'r ElmToken) -> bool >,
     CoalSig<ElmToken>
 >>;
 
@@ -108,16 +156,17 @@ trait IntoParsed: Iterator<Item=ElmToken> {
         let remove_dup_newlines : CoalSig<ElmToken> = |prev,cur| {
             match (prev,cur) {
                 (Newline(_,_), latest@Newline(_,_)) => Ok(latest),
+
                 (ElmToken::Type, Name(ref content)) if content == "alias" =>
                     Err((ElmToken::Type, ElmToken::Alias)),
+
                 (prev_, cur_) => Err((prev_, cur_)),
             }
         };
         StreamParser {
             input :
-                self.skip_while(is_newline)
-                    .coalesce(remove_dup_newlines)
-                    .peekable(),
+                multipeek(self.skip_while(is_newline)
+                    .coalesce(remove_dup_newlines)),
             stage : StageModuleDeclr,
         }
     }
@@ -126,18 +175,10 @@ impl<T: Iterator<Item=ElmToken>> IntoParsed for T {}
 
 impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageModuleDeclr> {
     fn next_step(mut self) -> StreamParser<I,StageModuleDoc> {
-        // Consumes the module declaration, also consumes the next newline.
-        let declr_stream =
-            self.input
-                .by_ref()
-                .take_while(not_match!(Newline(_,0)))
-                .filter(not_match!(Newline(_,_)))
-                .enumerate()
-                .map(|(i, token)| Ok((i, token, i+1)))
-                .collect::<Vec<_>>();
         let module_declr
-            = parse_ModuleDeclr(declr_stream)
+            = parse_ModuleDeclr(as_token_span!(self.input, filter_newlines))
                 .expect("Parsing error in module declaration");
+
         StreamParser {
             input : self.input,
             stage : StageModuleDoc{module_declr},
@@ -148,46 +189,39 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageModuleDeclr> {
 impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageModuleDoc> {
     fn next_step(mut self) -> StreamParser<I,StageImports> {
         // Consumes the doc string if existant.
-        match self.input.peek() {
-            Some(&DocComment(_)) => {
-                let module_declr = self.stage.module_declr;
-                let module_doc = match self.input.next() {
-                    Some(DocComment(content)) => Some(content),
-                    _ => None,
-                };
-                self.input.next().unwrap(); //We `peek` eariler what this was
-                StreamParser {
-                    input: self.input,
-                    stage: StageImports{module_declr, module_doc},
-                }
-            },
-            _ => {
-                let module_declr = self.stage.module_declr;
-                let module_doc = None;
-                StreamParser {
-                    input: self.input,
-                    stage: StageImports{module_declr, module_doc},
-                }
-            },
-        }
+        ifahead2!((self.input => &ElmToken::DocComment(_)) {
+            self.input.next().unwrap();
+            let module_declr = self.stage.module_declr;
+            let module_doc = match self.input.next() {
+                Some(DocComment(content)) => Some(content),
+                _ => None,
+            };
+            StreamParser {
+                input: self.input,
+                stage: StageImports{module_declr, module_doc},
+            }
+        } else {
+            let module_declr = self.stage.module_declr;
+            let module_doc = None;
+            StreamParser {
+                input: self.input,
+                stage: StageImports{module_declr, module_doc},
+            }
+        })
     }
 }
 
 impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageImports> {
     fn next_step(mut self) -> StreamParser<I,StageTopDeclrs> {
         let mut module_imports : Vec<tree::ElmImport> = Vec::new();
-        while self.input.peek() == Some(&ElmToken::Import) {
-            let import_stream =
-                self.input
-                    .by_ref()
-                    .take_while(not_match!(Newline(_,0)))
-                    .filter(not_match!(Newline(_,_)))
-                    .enumerate()
-                    .map(|(i, token)| Ok((i, token, i+1)));
-            let cur_import
-                = parse_Import(import_stream)
-                    .expect("Parsing error in imports");
-            module_imports.push(cur_import);
+        loop {
+            ifahead2!((self.input => &ElmToken::Import) {
+                let cur_import
+                    = parse_Import(as_token_span!(self.input, filter_newlines))
+                        .expect("Parsing error in imports");
+
+                module_imports.push(cur_import);
+            } else { break })
         }
         let module_declr = self.stage.module_declr;
         let module_doc = self.stage.module_doc;
@@ -201,38 +235,34 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageImports> {
 
 impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageTopDeclrs> {
     fn next_step(mut self) -> StreamParser<I,StageEof> {
-        // TODO: this is flawed because it doesn't capture lazily the
-        // tokens for function expression.
         let mut top_levels = Vec::new();
         loop {
+            self.input.reset_peek();
             match self.input.peek() {
-                Some(&Name(_)) | Some(&LParens) | Some(&Port) => {
-                    let preparsed_tokens =
-                        self.input
-                            .by_ref()
-                            .take_while(not_match!(ElmToken::Newline(_,0)))
-                            .filter_indent()
-                            .enumerate()
-                            .map(|(i, token)| Ok((i, token, i+1)));
-                    let top_declaration
-                        = parse_TopDeclr(preparsed_tokens)
-                            .expect("Error in function (or function \
-                                    type) parsing");
+                Some(&Newline(_,0)) => {
+                    if self.input.peek() == None { break }
+                    let top_declaration = match parse_TopDeclr(
+                        as_token_span!(self.input, filter_indent)
+                    ) {
+                        Ok(val) => val,
+                        Err(err) =>
+                            panic!("{:?}: {:?}\ntoplevels: {:?}\nself:{:?}, {:?}",
+                                   err,
+                                   self.input.collect::<Vec<_>>(),
+                                   top_levels,self.stage.module_declr,
+                                   self.stage.module_doc),
+                    };
                     top_levels.push(top_declaration);
                 },
-                Some(_) => {
-                    let toplevel_stream =
-                        self.input
-                            .by_ref()
-                            .take_while(not_match!(ElmToken::Newline(_,0)))
-                            .filter(not_match!(ElmToken::Newline(_,_)))
-                            .enumerate()
-                            .map(|(i, token)| Ok((i, token, i+1)));
-                    let top_declaration
-                        = parse_TopDeclr(toplevel_stream)
-                            .expect("Error while parsing a type declaration");
-                    top_levels.push(top_declaration);
-                },
+                Some(_) =>
+                    panic!("error in toplevel parsing:\n\
+                            encountered {:?} while expecting a top newline \
+                            token \n\
+                           {:?}\ntoplevels: {:?}\nself:{:?}, {:?}",
+                           self.input.next(),
+                           self.input.collect::<Vec<_>>(),
+                           top_levels,self.stage.module_declr,
+                           self.stage.module_doc),
                 None => break,
             }
         }
@@ -242,10 +272,7 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageTopDeclrs> {
         StreamParser {
             input: self.input,
             stage: StageEof {
-                module_declr,
-                module_doc,
-                module_imports,
-                top_levels,
+                module_declr, module_doc, module_imports, top_levels,
             },
         }
     }
@@ -447,7 +474,7 @@ impl<I:Iterator<Item=ElmToken>> Iterator for FilterIndent<I> {
                 self.buffer_stack.push(In);
                 self.pop_indents_to(IE::Delimiter);
             },
-            Newline(_, column) => {
+            Newline(_, column) if column != 0 => {
                 if let Some(&Let) = self.input.peek() {
                     self.let_alignement = Some(column + 4)
                 };
@@ -505,14 +532,7 @@ fn into_tree(parser: StageEof) -> tree::ElmModule {
 
     let ports = if list_ports.is_empty() { None } else { Some(list_ports) };
     tree::ElmModule {
-        name,
-        exports,
-        doc,
-        imports,
-        types,
-        functions,
-        infixities,
-        ports
+        name, exports, doc, imports, types, functions, infixities, ports
     }
 }
 
@@ -575,62 +595,43 @@ impl<I> Parser<I>
         use self::ParserState as ST;
         use self::ParserStage as SG;
         let old_stage = replace(&mut self.0, ST::Nothing);
+        macro_rules! next_n {
+            (+   ; $to_next:expr) => ( $to_next.next_step() );
+            (++  ; $to_next:expr) => (next_n!(+  ;$to_next.next_step()));
+            (+++ ; $to_next:expr) => (next_n!(++ ;$to_next.next_step()));
+            (++++; $to_next:expr) => (next_n!(+++;$to_next.next_step()));
+        }
+        macro_rules! fully_parsed {
+            ($arg:expr) => ( ST::FullyParsed(into_tree($arg.stage)))
+        }
         match (stage, old_stage) {
-            (SG::ModuleDoc, ST::ModuleDeclr(parser)) =>{
-                self.0 = ST::ModuleDoc(parser.next_step());
-            },
-            (SG::ModuleDoc, anyelse) =>{ self.0 = anyelse; },
+            (SG::ModuleDoc, ST::ModuleDeclr(parser)) =>
+                self.0 = ST::ModuleDoc(next_n!(+   ; parser)),
+            (SG::ModuleDoc, anyelse) => self.0 = anyelse,
 
-            (SG::Imports, ST::ModuleDeclr(parser)) =>{
-                self.0 = ST::Imports(
-                    parser.next_step().next_step()
-                );
-            },
-            (SG::Imports, ST::ModuleDoc(parser)) =>{
-                self.0 = ST::Imports(
-                    parser.next_step()
-                );
-            },
-            (SG::Imports, anyelse) =>{ self.0 = anyelse; },
+            (SG::Imports, ST::ModuleDeclr(parser)) =>
+                self.0 = ST::Imports(next_n!(++    ; parser)),
+            (SG::Imports, ST::ModuleDoc(parser)) =>
+                self.0 = ST::Imports(next_n!(+     ; parser)),
+            (SG::Imports, anyelse) => self.0 = anyelse,
 
-            (SG::TopDeclrs, ST::ModuleDeclr(parser)) =>{
-                self.0 = ST::TopDeclrs(
-                    parser.next_step().next_step().next_step()
-                );
-            },
-            (SG::TopDeclrs, ST::ModuleDoc(parser)) =>{
-                self.0 = ST::TopDeclrs(
-                    parser.next_step().next_step()
-                );
-            },
-            (SG::TopDeclrs, ST::Imports(parser)) =>{
-                self.0 = ST::TopDeclrs(
-                    parser.next_step()
-                );
-            },
-            (SG::TopDeclrs, anyelse) =>{ self.0 = anyelse; },
+            (SG::TopDeclrs, ST::ModuleDeclr(parser)) =>
+                self.0 = ST::TopDeclrs(next_n!(+++ ; parser)),
+            (SG::TopDeclrs, ST::ModuleDoc(parser)) =>
+                self.0 = ST::TopDeclrs(next_n!(++  ; parser)),
+            (SG::TopDeclrs, ST::Imports(parser)) =>
+                self.0 = ST::TopDeclrs(next_n!(+   ; parser)),
+            (SG::TopDeclrs, anyelse) => self.0 = anyelse,
 
-            (SG::FullyParsed, ST::ModuleDeclr(parser)) =>{
-                self.0 = ST::FullyParsed(into_tree(
-                    parser.next_step().next_step().next_step().next_step().stage
-                ));
-            },
-            (SG::FullyParsed, ST::ModuleDoc(parser)) =>{
-                self.0 = ST::FullyParsed(into_tree(
-                    parser.next_step().next_step().next_step().stage
-                ));
-            },
-            (SG::FullyParsed, ST::Imports(parser)) =>{
-                self.0 = ST::FullyParsed(into_tree(
-                    parser.next_step().next_step().stage
-                ));
-            },
-            (SG::FullyParsed, ST::TopDeclrs(parser)) =>{
-                self.0 = ST::FullyParsed(into_tree(
-                    parser.next_step().stage
-                ));
-            },
-            (SG::FullyParsed, anyelse) =>{ self.0 = anyelse; },
+            (SG::FullyParsed, ST::ModuleDeclr(parser)) =>
+                self.0 = fully_parsed!(next_n!(++++; parser)),
+            (SG::FullyParsed, ST::ModuleDoc(parser)) =>
+                self.0 = fully_parsed!(next_n!(+++ ; parser)),
+            (SG::FullyParsed, ST::Imports(parser)) =>
+                self.0 = fully_parsed!(next_n!(++  ; parser)),
+            (SG::FullyParsed, ST::TopDeclrs(parser)) =>
+                self.0 = fully_parsed!(next_n!(+   ; parser)),
+            (SG::FullyParsed, anyelse) => self.0 = anyelse,
         }
     }
 
