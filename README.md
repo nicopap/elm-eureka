@@ -120,3 +120,22 @@ to execution, so be aware.
 * I do not claim any copyrights over the files in "examples" directories. They
   are trivial generic implementations with no claims of fitness for any
   purpose.
+
+## Disclaimer and Copyrights
+
+Copyright 2018 Nicola Papale. This program is distributed under the terms of
+the GNU Lesser GPL.
+
+elm-eureka is free software: you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+elm-eureka is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License
+along with elm-eureka.  If not, see <http://www.gnu.org/licenses/>.
+
