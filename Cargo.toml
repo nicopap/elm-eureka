@@ -10,18 +10,14 @@ readme = "README.md"
 categories = ["parser-implementations", "text-processing"]
 license = "LGPL3"
 
-[build-dependencies.lalrpop]
-git = "https://github.com/nikomatsakis/lalrpop"
-branch = "master"
+[build-dependencies]
+lalrpop = "0.14.0"
 
 [dependencies]
 serde_json = "1.0"
-lalrpop-util = "0.13.1"
-itertools = "0.7.4"
+lalrpop-util = "0.14.0"
+itertools = "0.7.6"
 walkdir = "2"
-
-[patch.crates-io]
-itertools = { git = "https://github.com/nicopap/rust-itertools" }
 
 [dev-dependencies]
 pretty_assertions = "0.4.0"
