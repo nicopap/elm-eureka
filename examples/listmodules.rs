@@ -35,7 +35,7 @@ fn parse_and_feedback(
         let mut parser = Parser::new(char_stream);
         let exports = parser.module_exports().clone();
         let imports = parser.imports().to_vec();
-        let name = parser.module_name().clone();
+        let name = String::from(parser.module_name());
         let doc = parser.module_doc().clone();
         send.send(Some((module_name, name,doc,exports,imports))).unwrap();
     }

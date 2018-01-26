@@ -285,8 +285,9 @@ fn into_tree(parser: StageEof) -> tree::ElmModule {
     let tree::ModuleDeclr {name, exports} = module_declr;
     let doc = module_doc;
     let imports = module_imports;
-    let (list_ports, infixities, functions, types)
-        = tree::into_tree(top_levels.into_iter());
+    let tree::CoalecedTopDeclr {
+        ports:list_ports, infixities, functions, types
+    } = tree::into_tree(top_levels.into_iter());
 
     let ports = if list_ports.is_empty() { None } else { Some(list_ports) };
     tree::ElmModule {
@@ -415,20 +416,22 @@ impl<I> Parser<I>
     /// let symbols = parser.exposed_symbols();
     /// assert_eq!(symbols, vec!["f", "X"]);
     /// ```
-    pub fn exposed_symbols<'a>(&'a mut self) -> Vec<&'a str> {
+    pub fn exposed_symbols(&mut self) -> Vec<&str> {
         use self::ParserState as PS;
         use self::tree::ExportEntry as EE;
         self.evaluate_up_to(ParserStage::ModuleDoc);
         let exports =
             match self.0 {
+                PS::ModuleDeclr(_) => unreachable!(),
                 PS::ModuleDoc(ref parser) => &parser.stage.module_declr.exports,
-                PS::Imports(ref parser) => &parser.stage.module_declr.exports,
+                PS::Imports(ref parser) =>   &parser.stage.module_declr.exports,
                 PS::TopDeclrs(ref parser) => &parser.stage.module_declr.exports,
                 PS::FullyParsed(ref module_tree) => &module_tree.exports,
-                _ => unreachable!()
+                PS::Nothing => unreachable!(),
             };
         match *exports {
-            tree::ExportList::Unqualified => vec![],
+            tree::ExportList::Unqualified => { vec![]
+            },
             tree::ExportList::List(ref entries) => {
                 entries
                     .iter()
@@ -438,18 +441,18 @@ impl<I> Parser<I>
                         EE::WithConstructors(ref name,_) => name.as_ref(),
                         EE::WithAllConstructors(ref name) => name.as_ref(),
                     })
-                    .collect::<Vec<&'a str>>()
+                    .collect::<Vec<&str>>()
             },
         }
     }
 
     /// Returns the export list of the module. Evaluating it if needed
-    pub fn module_exports<'a>(&'a mut self) -> &'a tree::ExportList {
+    pub fn module_exports(&mut self) -> &tree::ExportList {
         use self::ParserState as PS;
         self.evaluate_up_to(ParserStage::ModuleDoc);
         match self.0 {
             PS::ModuleDoc(ref parser) => &parser.stage.module_declr.exports,
-            PS::Imports(ref parser) => &parser.stage.module_declr.exports,
+            PS::Imports(ref parser) =>   &parser.stage.module_declr.exports,
             PS::TopDeclrs(ref parser) => &parser.stage.module_declr.exports,
             PS::FullyParsed(ref module_tree) => &module_tree.exports,
             _ => unreachable!()
@@ -476,14 +479,14 @@ impl<I> Parser<I>
     /// let name = parser.module_name();
     /// assert_eq!(name, &String::from("My.Great.Module"));
     /// ```
-    pub fn module_name<'a>(&'a mut self) -> &'a String {
+    pub fn module_name(&mut self) -> &str {
         use self::ParserState as PS;
         self.evaluate_up_to(ParserStage::ModuleDoc);
         match self.0 {
-            PS::ModuleDoc(ref parser) => &parser.stage.module_declr.name,
-            PS::Imports(ref parser) => &parser.stage.module_declr.name,
-            PS::TopDeclrs(ref parser) => &parser.stage.module_declr.name,
-            PS::FullyParsed(ref module_tree) => &module_tree.name,
+            PS::ModuleDoc(ref parser) => parser.stage.module_declr.name.as_ref(),
+            PS::Imports(ref parser) =>   parser.stage.module_declr.name.as_ref(),
+            PS::TopDeclrs(ref parser) => parser.stage.module_declr.name.as_ref(),
+            PS::FullyParsed(ref module_tree) => module_tree.name.as_ref(),
             _ => unreachable!()
         }
     }
@@ -510,7 +513,7 @@ impl<I> Parser<I>
     /// let docs = parser.module_doc();
     /// assert_eq!(docs, &Some(String::from(" Some useful informations\n")));
     /// ```
-    pub fn module_doc<'a>(&'a mut self) -> &'a Option<String> {
+    pub fn module_doc(&mut self) -> &Option<String> {
         use self::ParserState as PS;
         self.evaluate_up_to(ParserStage::Imports);
         match self.0 {
@@ -522,7 +525,7 @@ impl<I> Parser<I>
     }
 
     /// Returns the list of import declarations. Evaluating it if needed
-    pub fn imports<'a>(&'a mut self) -> &'a [tree::ElmImport] {
+    pub fn imports(&mut self) -> &[tree::ElmImport] {
         use self::ParserState as PS;
         self.evaluate_up_to(ParserStage::TopDeclrs);
         match self.0 {
@@ -534,7 +537,7 @@ impl<I> Parser<I>
 
     /// Returns the list of function declarations. The
     /// whole file is parsed in order to to generate that list
-    pub fn functions<'a>(&'a mut self) -> &'a [tree::FunctionDeclaration] {
+    pub fn functions(&mut self) -> &[tree::FunctionDeclaration] {
         use self::ParserState as PS;
         self.evaluate_up_to(ParserStage::FullyParsed);
         match self.0 {
@@ -545,7 +548,7 @@ impl<I> Parser<I>
 
     /// Returns the list of type declarations. The
     /// whole file is parsed in order to to generate that list
-    pub fn types<'a>(&'a mut self) -> &'a [tree::TypeDeclaration] {
+    pub fn types(&mut self) -> &[tree::TypeDeclaration] {
         use self::ParserState as PS;
         self.evaluate_up_to(ParserStage::FullyParsed);
         match self.0 {

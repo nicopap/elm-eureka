@@ -208,11 +208,15 @@ pub struct ElmModule {
     pub ports: Option<Vec<PortDeclaration>>,
 }
 
-pub fn into_tree<I:Iterator<Item=TopDeclr> + Sized>(declrs : I)
-    -> (Vec<PortDeclaration>,
-        Vec<OperPriority>,
-        Vec<FunctionDeclaration>,
-        Vec<TypeDeclaration>)
+pub struct CoalecedTopDeclr {
+    pub ports: Vec<PortDeclaration>,
+    pub infixities: Vec<OperPriority>,
+    pub functions: Vec<FunctionDeclaration>,
+    pub types: Vec<TypeDeclaration>,
+}
+
+pub fn into_tree<I>(declrs : I) -> CoalecedTopDeclr
+    where I:Iterator<Item=TopDeclr> + Sized
 {
     use self::TopDeclr as TD;
 
@@ -270,6 +274,6 @@ pub fn into_tree<I:Iterator<Item=TopDeclr> + Sized>(declrs : I)
             })
         },
     } }
-    (ports, infixities, functions, types)
+    CoalecedTopDeclr {ports, infixities, functions, types}
 }
 
