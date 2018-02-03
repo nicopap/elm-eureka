@@ -1,5 +1,11 @@
 module A exposing (..)
 
+{-| module doc -}
+
+import Http
+import Http.Error as HE
+
+{-| function doc -}
 g x =
     case expr_1 of
         Ptrn_1 ->

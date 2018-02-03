@@ -19,8 +19,9 @@ use std::fmt;
 /// whitespaces and line/block comments.
 #[derive(PartialEq,Clone)]
 pub enum ElmToken {
-    /// line, column coordinate of token starting a new line.
-    Newline(i16,i16),
+    /// The start of a new line
+    /// `u32` is the column (starting at 1) of the first token in the line
+    Newline(u32),
     /// An opening parenthesis `(`
     LParens,
     /// A closing parenthesis `)`
@@ -123,7 +124,7 @@ impl fmt::Display for ElmToken {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use self::ElmToken::*;
         match *self {
-            Newline(_,column) => write!(f,"\n{:w$}","", w=(column as usize)),
+            Newline(column) => write!(f,"\n{:w$}","", w=(column as usize)),
             LParens => write!(f, "("),
             RParens => write!(f, ")"),
             Comma => write!(f, ","),
@@ -172,7 +173,7 @@ impl fmt::Debug for ElmToken {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use self::ElmToken::*;
         match *self {
-            Newline(line,column) => write!(f, "({},{})",line,column),
+            Newline(column) => write!(f, "\\n{}",column),
             LParens => write!(f, "<(>"),
             RParens => write!(f, "<)>"),
             Comma => write!(f, "<,>"),

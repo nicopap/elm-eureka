@@ -1,10 +1,9 @@
 //! A lazily evaluated parser
-use std::iter::SkipWhile;
+use std::iter::{SkipWhile,Peekable};
 use std::mem::replace;
 
-use itertools::{multipeek,MultiPeek,Coalesce,Itertools};
+use itertools::{Coalesce,Itertools};
 
-use ::position::Iterplus;
 use super::grammar::{parse_ModuleDeclr,parse_Import, parse_TopDeclr};
 use super::tree;
 use super::filter_indent::TokenIterator;
@@ -12,67 +11,33 @@ use ::tokens::ElmToken;
 use ::lexer::{LexableIterator,Lexer};
 use self::ElmToken::Newline;
 
-macro_rules! not_match {
-    ($to_match:pat) => (|x| match *x { $to_match => false, _ => true })
-}
-macro_rules! is_match {
-    ($to_match:pat) => (|x| match x { $to_match => true, _ => false })
+
+pub type Loc<X> = (u32,X);
+
+macro_rules! matches {
+    (not $to_match:pat) => (|x| match x { $to_match => false, _ => true });
+    ($to_match:pat)     => (|x| match x { $to_match => true, _ => false });
 }
 
-// NOTE: I use `appart_first_take` to keep the newline token at the beginning
-// of the parser input, so it can be used for location tracking.
-// This is so the TopDeclr parser can use the line information.
-// There is multiple alternate implementations I concidered such as:
-// * in `StageTopDeclrs`, pop the leading Newline of top declarations, use
-//   it with the result of the old parser
-//   * Needs refactoring the `StageTopDeclr` `next_step` function, must
-//     adapt the `tree::TopDeclr` to accomodate for both the parser and the
-//     "post-parser" modification of the data type.
-//   * Needs to setup somehow the first Newline.
-// * Add location tracking directly to the tokens (how every parsing libraries
-//   does it)
-//   * Attempted once, and gave up.
-//
-// The current solution has the advantage of being light on the line and logic
-// changes necessary to update the code.
-// Although, it might not  be the best in terms of performances.
-macro_rules! as_token_span {
-    ($input:expr, filter_newlines) => (
-        $input
+// Shorthand to convert a simple Loc<ElmToken> stream into
+// something that the LALRPOP-generated parser accepts
+macro_rules! lalrpopify {
+    (@ filter_nl $in:ident)=>($in.filter(matches!(not &(_,Newline(_)))));
+    (@ filter_indent $in:ident)  =>($in.filter_indent());
+    ($input:expr, $kind:ident) => ({
+        let line_cut = $input
             .by_ref()
-            .appart_first_take(not_match!(Newline(_,0)))
-            .filter(|x| match *x {Newline(_,x) if x != 0 => false, _ => true})
-            .enumerate()
-            .map(|(i, token)| Ok((i, token, i+1)))
-    );
-    ($input:expr, filter_indent) => (
-        $input
-            .by_ref()
-            .appart_first_take(not_match!(Newline(_,0)))
-            .filter_indent()
-            .enumerate()
-            .map(|(i, token)| Ok((i, token, i+1)))
-    )
-}
-
-// Look ahead in input two times, see what the token is, acts accordingly
-// (if it is the one we expect, we $iffound, otherwise we $iflost)
-macro_rules! ifahead2 {
-    (($input:expr => $pred:pat) $iffound:block  else  $iffalse:block ) => ({
-        $input.reset_peek();
-        $input.peek();
-        match $input.peek() {
-            Some($pred) => { $input.reset_peek(); $iffound },
-            _           => { $input.reset_peek(); $iffalse },
-        }
-    })
+            .take_while(matches!(not &(_,Newline(0))));
+        lalrpopify!(@ $kind line_cut)
+            .map(|(line,token)| Ok(( line, token, line )))
+    });
 }
 
 // wrappers to deal with lazy input stream reification.
 type CoalSig<X> = fn(X, X)->Result<X, (X,X)>;
-type OMG<I>=MultiPeek<Coalesce<
-    SkipWhile<I, for<'r> fn(&'r ElmToken) -> bool >,
-    CoalSig<ElmToken>
+type OMG<I>=Peekable<Coalesce<
+    SkipWhile<I,for<'r> fn(&'r Loc<ElmToken>) -> bool>,
+    CoalSig<Loc<ElmToken>>
 >>;
 
 struct StageModuleDeclr;
@@ -139,13 +104,13 @@ struct StageEof {
 ///    (currently only parses type declarations)
 ///
 /// 5. EOF: Nothing more to be parsed.
-struct StreamParser<I: Iterator<Item=ElmToken>, S = StageModuleDeclr> {
+struct StreamParser<I: Iterator<Item=Loc<ElmToken>>, S = StageModuleDeclr> {
     input : OMG<I>,
     stage : S,
 }
 
 /// Converts a token stream into a parser
-trait IntoParsed: Iterator<Item=ElmToken> {
+trait IntoParsed: Iterator<Item=Loc<ElmToken>> {
     /// Add some processing to the input token stream and embed
     /// into the Iterator adaptator StreamParser at its initial
     /// stage.
@@ -154,31 +119,32 @@ trait IntoParsed: Iterator<Item=ElmToken> {
     {
         use self::ElmToken::{Type, Name, Alias};
 
-        let is_newline : fn(&ElmToken) -> bool = is_match!(&Newline(_,_));
-        let remove_dup_newlines : CoalSig<ElmToken> = |prev,cur| {
+        let is_newline: fn(&Loc<ElmToken>)->bool = matches!(&(_,Newline(_)));
+        let remove_dup_newlines: CoalSig<Loc<ElmToken>> = |prev,cur| {
             match (prev,cur) {
-                (Newline(_,_), latest@Newline(_,_)) => Ok(latest),
+                ((_,Newline(_)), latest@(_,Newline(_))) => Ok(latest),
 
-                (Type, Name(ref content)) if content == "alias" =>
-                    Err((Type, Alias)),
+                ((tline,Type), (aline,Name(ref content))) if content == "alias" =>
+                    Err(( (tline,Type), (aline,Alias) )),
 
                 (prev_, cur_) => Err((prev_, cur_)),
             }
         };
         StreamParser {
             input :
-                multipeek(self.skip_while(is_newline)
-                    .coalesce(remove_dup_newlines)),
+                self.skip_while(is_newline)
+                    .coalesce(remove_dup_newlines)
+                    .peekable(),
             stage : StageModuleDeclr,
         }
     }
 }
-impl<T: Iterator<Item=ElmToken>> IntoParsed for T {}
+impl<T: Iterator<Item=Loc<ElmToken>>> IntoParsed for T {}
 
-impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageModuleDeclr> {
+impl<I:Iterator<Item=Loc<ElmToken>>> StreamParser<I,StageModuleDeclr> {
     fn next_step(mut self) -> StreamParser<I,StageModuleDoc> {
         let module_declr
-            = parse_ModuleDeclr(as_token_span!(self.input, filter_newlines))
+            = parse_ModuleDeclr(lalrpopify!(self.input, filter_nl))
                 .expect("Parsing error in module declaration");
 
         StreamParser {
@@ -188,42 +154,51 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageModuleDeclr> {
     }
 }
 
-impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageModuleDoc> {
+impl<I:Iterator<Item=Loc<ElmToken>>> StreamParser<I,StageModuleDoc> {
     fn next_step(mut self) -> StreamParser<I,StageImports> {
-        // Consumes the doc string if existant.
-        ifahead2!((self.input => &ElmToken::DocComment(_)) {
-            self.input.next().unwrap();
-            let module_declr = self.stage.module_declr;
-            let module_doc = match self.input.next() {
-                Some(ElmToken::DocComment(content)) => Some(content),
-                _ => None,
-            };
-            StreamParser {
-                input: self.input,
-                stage: StageImports{module_declr, module_doc},
+        // Consumes the module doc if existant.
+        match self.input.peek() {
+            Some(&(_, ElmToken::DocComment(_))) => {
+                let module_declr = self.stage.module_declr;
+                let module_doc = match self.input.next() {
+                    Some((_,ElmToken::DocComment(content))) =>
+                        Some(content),
+                    anyelse =>
+                        panic!("read a DocComment with a peek, \
+                                now, I get something different!
+                                : {:?}", anyelse),
+                };
+                StreamParser {
+                    input: self.input,
+                    stage: StageImports{module_declr, module_doc},
+                }
+            },
+            _ => {
+                let module_declr = self.stage.module_declr;
+                let module_doc = None;
+                StreamParser {
+                    input: self.input,
+                    stage: StageImports{module_declr, module_doc},
+                }
             }
-        } else {
-            let module_declr = self.stage.module_declr;
-            let module_doc = None;
-            StreamParser {
-                input: self.input,
-                stage: StageImports{module_declr, module_doc},
-            }
-        })
+        }
     }
 }
 
-impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageImports> {
+impl<I:Iterator<Item=Loc<ElmToken>>> StreamParser<I,StageImports> {
     fn next_step(mut self) -> StreamParser<I,StageTopDeclrs> {
         let mut module_imports : Vec<tree::ElmImport> = Vec::new();
         loop {
-            ifahead2!((self.input => &ElmToken::Import) {
-                let cur_import
-                    = parse_Import(as_token_span!(self.input, filter_newlines))
-                        .expect("Parsing error in imports");
+            match self.input.peek() {
+                Some(&(_, ElmToken::Import)) => {
+                    let cur_import
+                        = parse_Import(lalrpopify!(self.input, filter_nl))
+                            .expect("Parsing error in imports");
 
-                module_imports.push(cur_import);
-            } else { break })
+                    module_imports.push(cur_import);
+                },
+                _ => break
+            }
         }
         let module_declr = self.stage.module_declr;
         let module_doc = self.stage.module_doc;
@@ -235,38 +210,14 @@ impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageImports> {
 }
 
 
-impl<I:Iterator<Item=ElmToken>> StreamParser<I,StageTopDeclrs> {
+impl<I:Iterator<Item=Loc<ElmToken>>> StreamParser<I,StageTopDeclrs> {
     fn next_step(mut self) -> StreamParser<I,StageEof> {
         let mut top_levels = Vec::new();
         loop {
-            self.input.reset_peek();
-            match self.input.peek() {
-                Some(&Newline(_,0)) => {
-                    if self.input.peek() == None { break }
-                    let top_declaration = match parse_TopDeclr(
-                        as_token_span!(self.input, filter_indent)
-                    ) {
-                        Ok(val) => val,
-                        Err(err) =>
-                            panic!("{:?}: {:?}\ntoplevels: {:?}\nself:{:?}, {:?}",
-                                   err,
-                                   self.input.collect::<Vec<_>>(),
-                                   top_levels,self.stage.module_declr,
-                                   self.stage.module_doc),
-                    };
-                    top_levels.push(top_declaration);
-                },
-                Some(_) =>
-                    panic!("error in toplevel parsing:\n\
-                            encountered {:?} while expecting a top newline \
-                            token \n\
-                           {:?}\ntoplevels: {:?}\nself:{:?}, {:?}",
-                           self.input.next(),
-                           self.input.collect::<Vec<_>>(),
-                           top_levels,self.stage.module_declr,
-                           self.stage.module_doc),
-                None => break,
-            }
+            match parse_TopDeclr( lalrpopify!(self.input, filter_indent)) {
+                Ok(val) => top_levels.push(val),
+                Err(_) => break // TODO: handle this more gracefully
+            };
         }
         let module_declr = self.stage.module_declr;
         let module_doc = self.stage.module_doc;
@@ -295,7 +246,7 @@ fn into_tree(parser: StageEof) -> tree::ElmModule {
     }
 }
 
-enum ParserState<I:Iterator<Item=ElmToken>> {
+enum ParserState<I:Iterator<Item=Loc<ElmToken>>> {
     ModuleDeclr(StreamParser<I,StageModuleDeclr>),
     ModuleDoc(StreamParser<I,StageModuleDoc>),
     Imports(StreamParser<I,StageImports>),

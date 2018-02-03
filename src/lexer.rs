@@ -63,7 +63,7 @@ fn consume_line_comment<I>(input: &mut Peekable<I>)
 /// string if the comment was a doc comment.
 ///
 /// returns`(Some(DocCommentToken), #linesConsumed)`
-fn consume_block_comment<I>(input: &mut Peekable<I>) -> (Option<ElmToken>, i16)
+fn consume_block_comment<I>(input: &mut Peekable<I>) -> (Option<ElmToken>, u32)
     where I: Iterator<Item=char>
 {
     let mut last = '\0';
@@ -84,7 +84,7 @@ fn consume_block_comment<I>(input: &mut Peekable<I>) -> (Option<ElmToken>, i16)
         let mut accum = String::new();
         input.next().unwrap(); //We checked this is a "|"
         while let Some(c) = input.next() {
-            nl_consumed += (c == '\n') as i16;
+            nl_consumed += (c == '\n') as u32;
             if last == '{' && c == '-' {
                 depth += 1
             } else if last == '-' && c == '}' {
@@ -100,7 +100,7 @@ fn consume_block_comment<I>(input: &mut Peekable<I>) -> (Option<ElmToken>, i16)
         (None, nl_consumed)
     } else {
         while let Some(c) = input.next() {
-            nl_consumed += (c == '\n') as i16;
+            nl_consumed += (c == '\n') as u32;
             if last == '{' && c == '-' {
                 depth += 1
             } else if last == '-' && c == '}' {
@@ -223,13 +223,13 @@ fn consume_char(input: &mut Iterator<Item=char>) -> ElmToken {
 /// This is the same parser as char, just ignores \"
 /// NOTE: doesn't include the closing " in the `into` String.
 fn consume_string(input: &mut Iterator<Item=char>)
-    -> (ElmToken, i16)
+    -> (ElmToken, u32)
 {
     let mut into = String::new();
     let mut prev_is_escape = false;
     let mut nl_consumed = 0;
     while let Some(c) = input.next() {
-        nl_consumed += (c == '\n') as i16;
+        nl_consumed += (c == '\n') as u32;
         if c == '"' && !prev_is_escape {
             return (ElmToken::StringLit(into), nl_consumed)
         }
@@ -245,8 +245,8 @@ fn consume_string(input: &mut Iterator<Item=char>)
 ///
 /// # Returns
 /// `(Some(parsedToken), #LinesConsumed)`
-fn consume_newline<I>(input: &mut Peekable<I>, line: i16)
-    -> (Option<ElmToken>, i16)
+fn consume_newline<I>(input: &mut Peekable<I>)
+    -> (Option<ElmToken>, u32)
     where I: Iterator<Item=char>
 {
     let mut nl_consumed = 0;
@@ -256,9 +256,8 @@ fn consume_newline<I>(input: &mut Peekable<I>, line: i16)
             ' ' => {current_column += 1},
             '\n' => {nl_consumed += 1; current_column = 0},
             _ => {
-                let this_line = nl_consumed + line;
                 return (
-                     Some( ElmToken::Newline(this_line, current_column) ),
+                     Some(ElmToken::Newline(current_column)),
                      nl_consumed
                 )
             },
@@ -285,7 +284,7 @@ fn consume_newline<I>(input: &mut Peekable<I>, line: i16)
 /// last moment the evaluation of tokens.
 pub struct Lexer<I: Iterator<Item=char>> {
     input: Peekable<I>,
-    line_loc: i16,
+    line_loc: u32,
     last_white: bool,
 }
 
@@ -313,7 +312,7 @@ pub trait LexableIterator: Iterator<Item=char> {
 impl<T: Iterator<Item=char>> LexableIterator for T {}
 
 impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
-    type Item = ElmToken;
+    type Item = (u32,ElmToken);
 
     /// Spews tokens while consuming the input stream.
     /// Behaves nicely on a file without syntax errors.
@@ -331,7 +330,7 @@ impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
     /// use elm_eureka::ElmToken::{Name,Lambda,Assign,Operator,RArrow,StringLit,Number,Newline};
     /// let elm_source = "f x = λy -> x ** y
     /// g x = \"string\" ++ toString <| x * 9";
-    /// let lexer = elm_source.chars().lex();
+    /// let lexer = elm_source.chars().lex().map(|(_p,t)| t);
     /// let tokenized_source = lexer.collect::<Vec<ElmToken>>();
     /// assert_eq!(tokenized_source, vec![
     ///     Name(String::from("f")),
@@ -343,7 +342,7 @@ impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
     ///     Name(String::from("x")),
     ///     Operator(String::from("**")),
     ///     Name(String::from("y")),
-    ///     Newline(2,0),
+    ///     Newline(0),
     ///     Name(String::from("g")),
     ///     Name(String::from("x")),
     ///     Assign,
@@ -360,45 +359,51 @@ impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
     /// # Errors
     /// The stream may terminate early for
     /// undeterminate reasons, mostly broken code
-    fn next(&mut self) -> Option<ElmToken> {
+    fn next(&mut self) -> Option<(u32,ElmToken)> {
         let old_white = self.last_white;
         self.last_white = false;
 
+        macro_rules! return_token {
+            ($token:expr) => ({
+                return Some((self.line_loc, $token))
+            })
+        }
         { let input = &mut self.input; match input.next()? {
             '\r' => {},
             '\n' => {
                 let (token, nl_consumed)
-                    = consume_newline(input, self.line_loc + 1);
+                    = consume_newline(input);
                 self.line_loc += nl_consumed + 1;
                 self.last_white = true;
-                return token
+                let current_line = self.line_loc;
+                return token.map(|t| (current_line, t))
             },
             c if c.is_whitespace() => self.last_white = true,
-            '[' => return Some(ElmToken::LBracket),
-            ']' => return Some(ElmToken::RBracket),
-            '(' => return Some(ElmToken::LParens),
-            ')' => return Some(ElmToken::RParens),
-            ',' => return Some(ElmToken::Comma),
+            '[' => return_token!(ElmToken::LBracket),
+            ']' => return_token!(ElmToken::RBracket),
+            '(' => return_token!(ElmToken::LParens),
+            ')' => return_token!(ElmToken::RParens),
+            ',' => return_token!(ElmToken::Comma),
             '{' => {
                 if input.peek().map_or(false, |&c| c == '-') {
                     match consume_block_comment(input) {
                         (Some(doc), nl_consumed) => {
                             self.line_loc += nl_consumed;
-                            return Some(doc)
+                            return_token!(doc)
                         },
                         (None, nl_consumed) => self.line_loc += nl_consumed,
                     }
-                } else { return Some(ElmToken::LBrace) }
+                } else { return_token!(ElmToken::LBrace) }
             },
             '}' =>
-                return Some(ElmToken::RBrace),
+                return_token!(ElmToken::RBrace),
 
             '.' => match input.peek() {
                 Some(&c) if is_operator(c) =>
-                    return Some(consume_operator(input, '.')),
+                    return_token!(consume_operator(input, '.')),
 
                 Some(&c) if c.is_alphabetic() =>
-                    return Some(consume_name(input, '.')),
+                    return_token!(consume_name(input, '.')),
 
                 _ => unreachable!(),
             },
@@ -407,41 +412,41 @@ impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
                         consume_line_comment(input),
 
                     Some(&c) if is_operator(c) =>
-                        return Some(consume_operator(input, '-')),
+                        return_token!(consume_operator(input, '-')),
 
                     Some(_) if !old_white =>
-                        return Some(ElmToken::Operator(String::from("-"))),
+                        return_token!(ElmToken::Operator(String::from("-"))),
 
                     Some(&c) if c.is_digit(10) =>
                         //FIXME: add proper handling for prefix '-' (requires
                         //patching the expression grammar). Currently,
                         //valid constructs such as 10 -(3 * 3) will blow up
-                        return Some(consume_number(input, '-')),
+                        return_token!(consume_number(input, '-')),
 
                     Some(_) =>
-                        return Some(ElmToken::Operator(String::from("-"))),
+                        return_token!(ElmToken::Operator(String::from("-"))),
 
                     None => unreachable!(),
             },
             c if is_operator(c) =>
-                return Some(consume_operator(input, c)),
+                return_token!(consume_operator(input, c)),
 
             c if c.is_alphabetic() =>
-                return Some(consume_name(input, c)),
+                return_token!(consume_name(input, c)),
 
             c @ '0' ... '9' =>
-                return Some(consume_number(input, c)),
+                return_token!(consume_number(input, c)),
 
             '_' =>
-                return Some(ElmToken::Underscore),
+                return_token!(ElmToken::Underscore),
 
             '"' => {
                 let (token, nl_consumed) = consume_string(input);
                 self.line_loc += nl_consumed;
-                return Some(token)
+                return_token!(token)
             },
             '\'' =>
-                return Some(consume_char(input)),
+                return_token!(consume_char(input)),
 
             c => {
                 println!("######{}#####", c);
@@ -456,7 +461,7 @@ impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
     use super::*;
 
     macro_rules! s {
-        ($fn_to_call:expr, $str_to_conv:expr) => (
+        ($fn_to_call:ident, $str_to_conv:expr) => (
             $fn_to_call(String::from($str_to_conv))
         )
     }
@@ -483,30 +488,30 @@ main =
     #[test] fn test_lexer() {
         use tokens::ElmToken::*;
         let str_input = String::from(UNORDERED_LIST_EXAMPLE);
-        let lexer = str_input.chars().lex();
+        let lexer = str_input.chars().lex().map(|(_p,t)| t);
         let token_vec = lexer.collect::<Vec<_>>();
         assert_eq!(
             token_vec, vec![Import, s!(Name,"Html"), Exposing, LParens,
             s!(Name,"li"), Comma, s!(Name,"text"), Comma, s!(Name,"ul"),
-            RParens, Newline(2, 0), Import, s!(Name,"Html.Attributes"),
+            RParens, Newline(0), Import, s!(Name,"Html.Attributes"),
             Exposing, LParens, s!(Name,"class"), Comma, s!(Name, "Stuff"),
-            LParens, Ellision, RParens, RParens, Newline(5,0),
+            LParens, Ellision, RParens, RParens, Newline(0),
             DocComment(String::from(r#" This {- Hello :)-}
 
 Et maintenant le voyage au supermarché!
-"#)), Newline(9,0), s!(Name,"main"), Assign,
-            Newline(10,2), s!(Name,"ul"), LBracket, s!(Name,"class"), s!(StringLit,"grocery-list"), RBracket,
-            Newline(11,4),LBracket,s!(Name,"li"),LBracket, RBracket,
+"#)), Newline(0), s!(Name,"main"), Assign,
+            Newline(2), s!(Name,"ul"), LBracket, s!(Name,"class"), s!(StringLit,"grocery-list"), RBracket,
+            Newline(4),LBracket,s!(Name,"li"),LBracket, RBracket,
             LBracket, s!(Name, ".model"), s!(Operator, ">>"),
             s!(Name,"text"), s!(StringLit,"Pamplemousse"), RBracket,
-            Newline(12,4), Comma, s!(Name,"li"), LBracket, RBracket,
+            Newline(4), Comma, s!(Name,"li"), LBracket, RBracket,
             LBracket, s!(Name, "Name.Wow"), s!(Operator, "<<"),
             s!(Name,"text"), s!(StringLit,"Ananas"), RBracket,
-            Newline(13,4), Comma, s!(Name,"li"), LBracket, RBracket,
+            Newline(4), Comma, s!(Name,"li"), LBracket, RBracket,
             LBracket, s!(Name,"text"), s!(Number, "103"), s!(StringLit,"Jus d'orange"), RBracket,
-            Newline(14,4), Comma, s!(Name,"li"), LBracket, RBracket,
+            Newline(4), Comma, s!(Name,"li"), LBracket, RBracket,
             LBracket, s!(Name,"text"), s!(StringLit,"Bœuf"), RBracket,
-            Newline(15,4), RBracket, Newline(18,0)]);
+            Newline(4), RBracket, Newline(0)]);
     }
 
     // IMPORTANT NOTE: This test in very limited, there is a lot of ways to
@@ -515,7 +520,7 @@ Et maintenant le voyage au supermarché!
     #[test] fn number_lexing() {
         use tokens::ElmToken::*;
         let src = String::from("name-10e-10 10-10 10e+99 0x1e+99 0xabcd --0x449");
-        let tknzd = src.chars().lex().collect::<Vec<_>>();
+        let tknzd = src.chars().lex().map(|(_p,t)| t).collect::<Vec<_>>();
         assert_eq!(tknzd, vec![
             s!(Name,"name"), s!(Operator,"-"), s!(Number,"10e-10"),
             s!(Number,"10"), s!(Operator,"-"), s!(Number,"10"),

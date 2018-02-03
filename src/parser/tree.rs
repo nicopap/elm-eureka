@@ -7,7 +7,7 @@
 //! I intend to only export the types that enter into
 //! the construction of the global parse tree (ElmModule)
 
-pub type Location = i16;
+pub type Location = u32;
 pub type Name = String;
 pub type Operator = String;
 
@@ -36,13 +36,13 @@ pub struct ElmImport {
     pub global_name: Name,
     pub local_name: Option<Name>,
     pub exposes: Option<ExportList>,
-    pub location: i16,
+    pub location: u32,
 }
 
 #[derive(Debug,Clone)]
 pub enum TopDeclr {
     OperPriority(OperPriority),
-    DocString(String),
+    DocComment(String),
     TypeDeclr(Location, TypeDeclr),
     TypeAlias(Location, TypeAlias),
     FunctionAnnotation(Location, bool, Name, Type),
@@ -65,7 +65,7 @@ pub struct FunctionDeclaration {
     pub kind: FunctionKind,
     pub arguments: Vec<Pattern>,
     body: Expression,
-    location: i16,
+    location: u32,
 }
 
 #[derive(Debug,Clone)]
@@ -73,7 +73,7 @@ pub struct PortDeclaration {
     pub annotation: Type,
     pub doc: Option<String>,
     pub name: Name,
-    location: i16,
+    location: u32,
 }
 
 #[derive(Debug,Clone)]
@@ -105,7 +105,7 @@ pub struct TypeDeclaration {
     pub type_variables: Vec<Name>,
     pub genre: TypeGenre,
     pub doc: Option<String>,
-    location: i16,
+    location: u32,
 }
 
 #[derive(Debug,Clone)]
@@ -178,13 +178,25 @@ pub enum Expression {
     EmptyList,
     IfThenElse(Box<Expression>, Box<Expression>, Box<Expression>),
     LetIn(Vec<LetDeclaration>, Box<Expression>),
-    CaseOf(Box<Expression>, Vec<(Pattern, Expression)>),
-    Lambda(Vec<Pattern>, Box<Expression>),
-    InfixApplication(Vec<(Expression, Operator)>, Box<Expression>),
+    /// case <condition> of (branches)
+    CaseOf {
+        condition: Box<Expression>,
+        branches: Vec<(u32, Pattern, Expression)>,
+    },
+    Lambda {
+        arguments: Vec<Pattern>,
+        body: Box<Expression>,
+        location: u32,
+    },
+    /// <(<Expression> <op>) (<Expression> <op>) ... <op>)> <trailing>
+    InfixApplication {
+        prefixes: Vec<(Expression, Operator)>,
+        trailing: Box<Expression>,
+    },
     Application(Vec<Expression>),
     Variable(Name),
     PrefixOperator(Operator),
-    // i16 is the arrity of the constructor
+    /// i16 is the arrity of the constructor
     TupleConstructor(i16),
 }
 
@@ -194,6 +206,7 @@ pub struct LetDeclaration {
     pub name: Option<Name>,
     pub arguments: Vec<Pattern>,
     pub body: Expression,
+    pub location: u32,
 }
 
 #[derive(Debug,Clone)]
@@ -224,31 +237,31 @@ pub fn into_tree<I>(declrs : I) -> CoalecedTopDeclr
     let mut infixities = Vec::new();
     let mut functions = Vec::new();
     let mut types = Vec::new();
-    let mut last_docstring : Option<String> = None;
+    let mut last_doc : Option<String> = None;
     let mut last_annotation : Option<Type> = None;
     for top_declr in declrs { match top_declr {
         TD::OperPriority(oper_priority) => {
             infixities.push(oper_priority);
         },
-        TD::DocString(content) => {
-            last_docstring = Some(content);
+        TD::DocComment(content) => {
+            last_doc = Some(content);
         },
         TD::TypeDeclr(location,TypeDeclr{name,type_variables,alternatives}) =>{
-            let doc = last_docstring.take();
+            let doc = last_doc.take();
             let genre = TypeGenre::Full(alternatives);
             types.push(TypeDeclaration {
                 name, type_variables, genre, doc, location
             })
         },
         TD::TypeAlias(location, TypeAlias{name, type_, type_variables}) => {
-            let doc = last_docstring.take();
+            let doc = last_doc.take();
             let genre = TypeGenre::Alias(type_);
             types.push(TypeDeclaration {
                 name, type_variables, genre, doc, location
             })
         },
         TD::FunctionAnnotation(location, true, name, annotation) => {
-            let doc = last_docstring.take();
+            let doc = last_doc.take();
             ports.push(PortDeclaration {doc, name, annotation, location})
         },
         TD::FunctionAnnotation(_, false, _, type_) => {
@@ -258,7 +271,7 @@ pub fn into_tree<I>(declrs : I) -> CoalecedTopDeclr
             last_annotation = Some(type_);
         },
         TD::FunctionDeclr(location, name, arguments, body) => {
-            let doc = last_docstring.take();
+            let doc = last_doc.take();
             let kind = FunctionKind::Regular;
             let annotation = last_annotation.take();
             functions.push(FunctionDeclaration {
@@ -266,7 +279,7 @@ pub fn into_tree<I>(declrs : I) -> CoalecedTopDeclr
             })
         },
         TD::OperatorDeclr(location, name, arguments, body) => {
-            let doc = last_docstring.take();
+            let doc = last_doc.take();
             let kind = FunctionKind::Operator;
             let annotation = last_annotation.take();
             functions.push(FunctionDeclaration {

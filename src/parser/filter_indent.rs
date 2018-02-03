@@ -7,9 +7,12 @@ use std::iter::Peekable;
 
 use ::tokens::ElmToken;
 
-#[derive(PartialEq, Copy, Clone)] enum IndentEntry {
-    Let(i16),
-    Case(i16),
+pub type Loc<X> = (u32,X);
+
+#[derive(PartialEq, Copy, Clone)]
+enum IndentEntry {
+    Let(u32),
+    Case(u32),
     // The delimiters are `let .. in`, `( .. )`, `[ .. ]`, `{ .. }`,
     // `if .. then .. else`.
     // Keeping track of them helps telling where to insert the `endcase`
@@ -30,7 +33,9 @@ impl fmt::Debug for IndentEntry {
         }
     }
 }
-#[derive(PartialEq, Debug, Copy, Clone)] enum IndentTrigger {Let, Of}
+
+#[derive(PartialEq, Debug, Copy, Clone)]
+enum IndentTrigger {Let, Of}
 
 /// An iterator adaptator that turns Newline tokens into meaningfull
 /// indentation for the parser to consume.
@@ -42,7 +47,7 @@ impl fmt::Debug for IndentEntry {
 /// keeps track of what "meaningfull" indentation lines to look for, but
 /// also of enclosing delimiters such as `()`, `[]` or `{}`. This is so
 /// we do not insert `endcase` tokens at the wrong place.
-pub struct FilterIndent<I:Iterator<Item=ElmToken>> {
+pub struct FilterIndent<I:Iterator<Item=Loc<ElmToken>>> {
     input: Peekable<I>,
     // Holds information about the levels of indentation we are in, and
     // if there is "enclosing" expressions that renders `Of` ending moot.
@@ -51,11 +56,12 @@ pub struct FilterIndent<I:Iterator<Item=ElmToken>> {
     // it there so at the next newline we know what to do
     indent_trigger: Option<IndentTrigger>,
     // A buffer to hold multiple tokens we want to emit later.
-    buffer_stack: Vec<ElmToken>,
-    let_alignement: Option<i16>,
+    buffer_stack: Vec<Loc<ElmToken>>,
+    let_alignement: Option<u32>,
+    last_loc: u32,
 }
 
-impl<I:Iterator<Item=ElmToken>> FilterIndent<I> {
+impl<I:Iterator<Item=Loc<ElmToken>>> FilterIndent<I> {
     // Pop `indent_stack`, closing off unfinished Case expressions by
     // pushing `Endcase` in `buffer_stack`. `indent_stack` is poped until
     // given `entry` is found, the corresponding item is poped from the
@@ -72,7 +78,7 @@ impl<I:Iterator<Item=ElmToken>> FilterIndent<I> {
         loop { match self.indent_stack.pop() {
             None => return,
             Some(IndentEntry::Case(indent_level)) if last_indenter_is_case => {
-                self.buffer_stack.push(ElmToken::Endcase);
+                self.buffer_stack.push((self.last_loc, ElmToken::Endcase));
                 if IndentEntry::Case(indent_level) == entry { return }
             },
             Some(IndentEntry::Case(indent_level)) /* otherwise */ => {
@@ -91,7 +97,7 @@ impl<I:Iterator<Item=ElmToken>> FilterIndent<I> {
     //
     // Ideally this should be inlined in the only place where calling this
     // function is relevent (in source code)
-    fn locate_indent(&mut self, indent_level: i16) {
+    fn locate_indent(&mut self, indent_level: u32) {
         // This function works in two steps:
         // 1. detects if an entry in the `indent_stack` has the corresponding
         //    `indent_level`.
@@ -100,23 +106,27 @@ impl<I:Iterator<Item=ElmToken>> FilterIndent<I> {
         use self::IndentEntry::{Case,Let};
         if self.indent_stack.is_empty() { return }
         let stack_last = self.indent_stack.len() - 1;
-        let mut idx = stack_last;
-        match loop {
-            // I mean seriously, this is bound checked 1000%
-            let current_indenter = self.indent_stack.get(idx).unwrap();
-            match *current_indenter {
-                Case(indent) if indent == indent_level => {
-                    self.buffer_stack.push(ElmToken::CaseIndent);
-                    break Some(idx)
-                },
-                Let(indent) if indent == indent_level => {
-                    self.buffer_stack.push(ElmToken::LetIndent);
-                    break Some(idx)
-                },
-                _ => {},
+        match {
+            let mut matching_index = stack_last;
+            loop {
+                let current_indenter
+                    = self.indent_stack.get(matching_index).unwrap();
+                match *current_indenter {
+                    Case(indent) if indent == indent_level => {
+                        let line = self.last_loc;
+                        self.buffer_stack.push((line, ElmToken::CaseIndent));
+                        break Some(matching_index)
+                    },
+                    Let(indent) if indent == indent_level => {
+                        let line = self.last_loc;
+                        self.buffer_stack.push((line, ElmToken::LetIndent));
+                        break Some(matching_index)
+                    },
+                    _ => {},
+                }
+                if matching_index == 0 { break None }
+                matching_index -= 1;
             }
-            if idx == 0 { break None }
-            idx -= 1;
         } { // 2.
             None => return,
             Some(indenter_location) => {
@@ -125,12 +135,12 @@ impl<I:Iterator<Item=ElmToken>> FilterIndent<I> {
                 // Pop values over the indentation we found (leaving
                 // the one we found)
                 // pop_count is lower than the size of the indent_stack,
-                // so we have the guarentee that the wrapping off will
-                // not panic
+                // therefore no panic in the `unwrap`
                 for _ in 0..pop_count {
                     match self.indent_stack.pop().unwrap() {
                         Case(_) if last_indenter_is_case => {
-                            self.buffer_stack.push(ElmToken::Endcase);
+                            let line = self.last_loc;
+                            self.buffer_stack.push((line,ElmToken::Endcase));
                         },
                         Case(_) => last_indenter_is_case = true,
                         _ => last_indenter_is_case = false,
@@ -140,14 +150,15 @@ impl<I:Iterator<Item=ElmToken>> FilterIndent<I> {
                 if last_indenter_is_case
                    && self.indent_stack.last() == Some(&Case(indent_level))
                 {
-                    self.buffer_stack.push(ElmToken::Endcase)
+                    let line = self.last_loc;
+                    self.buffer_stack.push((line,ElmToken::Endcase))
                 }
             },
         }
     }
 }
 
-impl<I:Iterator<Item=ElmToken>> fmt::Debug for FilterIndent<I> {
+impl<I:Iterator<Item=Loc<ElmToken>>> fmt::Debug for FilterIndent<I> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let &FilterIndent{
             ref indent_stack,
@@ -161,9 +172,10 @@ impl<I:Iterator<Item=ElmToken>> fmt::Debug for FilterIndent<I> {
     }
 }
 
-impl<I:Iterator<Item=ElmToken>> Iterator for FilterIndent<I> {
-    type Item=ElmToken;
-    fn next(&mut self) -> Option<ElmToken> {
+impl<I:Iterator<Item=Loc<ElmToken>>> Iterator for FilterIndent<I> {
+    type Item=Loc<ElmToken>;
+
+    fn next(&mut self) -> Option<Loc<ElmToken>> {
         use self::ElmToken::*;
         use self::IndentTrigger as IT;
         use self::IndentEntry as IE;
@@ -172,57 +184,60 @@ impl<I:Iterator<Item=ElmToken>> Iterator for FilterIndent<I> {
         let let_alignement = self.let_alignement.take();
 
         match self.input.next() {
-            Some(token) => match token {
-            LParens | LBrace | LBracket | If => {
-                self.indent_stack.push(IE::Delimiter);
-                return Some(token);
-            },
-            Let => {
-                self.indent_trigger = Some(IT::Let);
-                self.indent_stack.push(IE::Delimiter);
-                match self.input.peek() {
-                    Some(&Newline(_,_)) => {},
-                    Some(_) => if let Some(alignement) = let_alignement {
-                        self.indent_stack.push(IE::Let(alignement));
-                        self.indent_trigger = None;
-                    },
-                    None => {},
-                };
-                return Some(Let);
-            },
-            Of => {
-                self.indent_trigger = Some(IT::Of);
-                return Some(Of);
-            },
-            RParens | RBrace | RBracket | Else => {
-                self.buffer_stack.push(token);
-                self.pop_indents_to(IE::Delimiter);
-            },
-            In => {
-                self.indent_trigger = None;
-                self.buffer_stack.push(In);
-                self.pop_indents_to(IE::Delimiter);
-            },
-            Newline(_, column) if column != 0 => {
-                if let Some(&Let) = self.input.peek() {
-                    self.let_alignement = Some(column + 4)
-                };
-                match self.indent_trigger {
-                    Some(IT::Let) => {
-                        self.indent_trigger = None;
-                        self.indent_stack.push(IE::Let(column));
-                    },
-                    Some(IT::Of) => {
-                        self.indent_trigger = None;
-                        self.indent_stack.push(IE::Case(column));
-                    },
-                    None => match self.input.peek() {
-                        Some(&Operator(_)) => {},
-                        _ => self.locate_indent(column),
-                    },
-                }
-            },
-            any_other => return Some(any_other),
+            Some((line,token)) => {
+            self.last_loc = line;
+            match token {
+                LParens | LBrace | LBracket | If => {
+                    self.indent_stack.push(IE::Delimiter);
+                    return Some((line,token));
+                },
+                Let => {
+                    self.indent_trigger = Some(IT::Let);
+                    self.indent_stack.push(IE::Delimiter);
+                    match self.input.peek() {
+                        Some(&(_,Newline(_))) => {},
+                        Some(_) => if let Some(alignement) = let_alignement {
+                            self.indent_stack.push(IE::Let(alignement));
+                            self.indent_trigger = None;
+                        },
+                        None => {},
+                    };
+                    return Some((line,Let));
+                },
+                Of => {
+                    self.indent_trigger = Some(IT::Of);
+                    return Some((line,Of));
+                },
+                RParens | RBrace | RBracket | Else => {
+                    self.buffer_stack.push((line,token));
+                    self.pop_indents_to(IE::Delimiter);
+                },
+                In => {
+                    self.indent_trigger = None;
+                    self.buffer_stack.push((line,In));
+                    self.pop_indents_to(IE::Delimiter);
+                },
+                Newline(column) if column != 0 => {
+                    if let Some(&(_,Let)) = self.input.peek() {
+                        self.let_alignement = Some(column + 4)
+                    };
+                    match self.indent_trigger {
+                        Some(IT::Let) => {
+                            self.indent_trigger = None;
+                            self.indent_stack.push(IE::Let(column));
+                        },
+                        Some(IT::Of) => {
+                            self.indent_trigger = None;
+                            self.indent_stack.push(IE::Case(column));
+                        },
+                        None => match self.input.peek() {
+                            Some(&(_,Operator(_))) => {},
+                            _ => self.locate_indent(column),
+                        },
+                    }
+                },
+                any_other => return Some((line,any_other)),
+            }
             },
             None if !self.indent_stack.is_empty() =>
                 // End of input, need to wrap up
@@ -238,15 +253,16 @@ impl<I:Iterator<Item=ElmToken>> Iterator for FilterIndent<I> {
     }
 }
 
-pub trait TokenIterator: Iterator<Item=ElmToken> {
+pub trait TokenIterator: Iterator<Item=Loc<ElmToken>> {
     fn filter_indent(self) -> FilterIndent<Self> where Self: Sized {
         FilterIndent {
-            input : self.peekable(),
-            indent_stack : Vec::new(),
-            indent_trigger : None,
+            input: self.peekable(),
+            indent_stack: Vec::new(),
+            indent_trigger: None,
             buffer_stack: Vec::new(),
             let_alignement: None,
+            last_loc: 0,
         }
     }
 }
-impl<T: Iterator<Item=ElmToken>> TokenIterator for T {}
+impl<T: Iterator<Item=Loc<ElmToken>>> TokenIterator for T {}
