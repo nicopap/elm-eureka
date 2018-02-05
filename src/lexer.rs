@@ -161,7 +161,7 @@ fn consume_name<I>(input: &mut Peekable<I>, from: char) -> ElmToken
 
 /// Consumes a number literal. A number literal can be one of the
 /// following:
-/// ```
+/// ```ignore
 /// x[0-9a-fA-F]+
 /// [0-9]*(.[0-9]+)?(e[-+]?[0-9]+)?
 /// ```
@@ -457,6 +457,7 @@ impl <I: Iterator<Item=char>> Iterator for Lexer<I> {
 
 #[cfg(test)] mod tests {
     use super::*;
+    use test::{Bencher,black_box};
 
     macro_rules! s {
         ($fn_to_call:ident, $str_to_conv:expr) => (
@@ -613,5 +614,14 @@ Et maintenant le voyage au supermarché!
             "ẑloat",
             "héllö {- hî-} wörld!ŵ\n"
         );
+    }
+
+    #[bench] fn bench_lexer(bench: &mut Bencher) {
+        let source_txt = include_str!("../examples/elmjutsu-5k.elm");
+        bench.iter(|| {
+            let owned_txt = source_txt.to_owned();
+            let token_stream = owned_txt.chars().lex();
+            black_box({token_stream.collect::<Vec<_>>();()})
+        })
     }
 }

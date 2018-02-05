@@ -131,6 +131,8 @@
 //! * I do not claim any copyrights over the files in "examples" directories. They
 //! 	are trivial generic implementations with no claims of fitness for any
 //! 	purpose.
+#![feature(test)]
+#[cfg(test)] extern crate test;
 extern crate serde_json;
 extern crate itertools;
 extern crate walkdir;
