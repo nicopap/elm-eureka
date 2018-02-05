@@ -11,14 +11,13 @@ use std::io::prelude::*;
 use std::io::BufReader;
 use std::fs::File;
 use std::ops::IndexMut;
+use std::error::Error;
 
 use elm_eureka::Parser;
 use elm_eureka::packages_reader;
 use elm_eureka::parser::tree;
 
-//There is a race condition somehow????
-//FIXME: if there is more than 1 thread, stuff breaks
-const NTHREAD:usize=1;
+const NTHREAD:usize=4;
 
 struct ModuleMessage {
     module_name: String,
@@ -36,13 +35,13 @@ fn parse_and_feedback(
         let file = File::open(source_path).unwrap();
         let char_stream = BufReader::new(file).chars().map(|x| x.unwrap());
         let mut parser = Parser::new(char_stream);
-        let exports = parser.module_exports().clone();
-        let imports = parser.imports().to_vec();
-        let name = parser.module_name().to_owned();
-        let doc = parser.module_doc().clone();
-        send.send(
+        let tree::ElmModule{exports,imports,name,doc,..} = parser.into_parse_tree();
+        match send.send(
             Some(ModuleMessage{module_name, name,doc,exports,imports})
-        ).unwrap();
+        ) {
+            Ok(()) => (),
+            Err(err) => panic!("{:?}", err.description()),
+        };
     }
     send.send(None).unwrap();
 }
@@ -74,29 +73,34 @@ pub fn main() {
     for chan in send_channels {
         chan.send(None).unwrap();
     }
-    while let Some(ModuleMessage{module_name:module, name,doc,exports,imports})
-        = receive_processed.recv().unwrap()
-    {
-        let module_doc : String =
-            doc .clone()
-                .map(|x| x.chars().take_while(|&c| c != '\n').collect())
-                .unwrap_or_else(|| "No docstrings :(".to_owned());
 
-        let module_name = &name;
-        let module_exports = match exports {
-            tree::ExportList::Unqualified => format!("{}", "unqualified"),
-            tree::ExportList::List(ref exports) => format!("{:?}", exports),
-        };
-        let module_imports = format!("{:?}", imports);
-        println!("
-            #### {} ####
-            name: {}
-            exports: {}
-            has doc: {}
-            imports: {}
-            ", module, module_name, module_exports,
-            module_doc,
-            module_imports
-        );
+    let mut closed_channels = 0;
+    while closed_channels < NTHREAD {
+        let maybe_msg = receive_processed.recv().unwrap();
+        match maybe_msg {
+            Some(ModuleMessage{module_name, name,doc,exports,imports}) => {
+                let module_doc : String =
+                    doc .clone()
+                        .map(|x| x.chars().take_while(|&c| c != '\n').collect())
+                        .unwrap_or_else(|| "No docstrings :(".to_owned());
+
+                let module_exports = match exports {
+                    tree::ExportList::Unqualified => "unqualified".to_owned(),
+                    tree::ExportList::List(ref exports) => format!("{:?}", exports),
+                };
+                let module_imports = format!("{:?}", imports);
+                println!("
+                    #### {} ####
+                    name: {}
+                    exports: {}
+                    has doc: {}
+                    imports: {}
+                    ", module_name, &name, module_exports,
+                    module_doc,
+                    module_imports
+                );
+            },
+            None => closed_channels += 1,
+        }
     }
 }
