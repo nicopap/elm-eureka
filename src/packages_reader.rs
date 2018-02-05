@@ -118,7 +118,7 @@ fn all_exposed_modules(project_root : &Path) -> Vec<(String, PathBuf)> {
         .map(|x| String::from(x.as_str().expect("")))
         .map(move |exposed| {
             let exposed_copy = exposed.clone();
-            let mut root_copy = project_root.clone().join("src");
+            let mut root_copy = project_root.to_owned().join("src");
             root_copy = root_copy.join(exposed_copy.replace('.',"/"));
             root_copy.set_extension("elm");
 

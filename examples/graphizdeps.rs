@@ -15,7 +15,8 @@ use elm_eureka::packages_reader;
 
 pub fn main() {
     let packagepath =
-        args().nth(1).unwrap_or(String::from("examples/elm-spa-example"));
+        args().nth(1)
+            .unwrap_or_else(|| "examples/elm-spa-example".to_owned());
     let sources = packages_reader::info(packagepath.as_ref()).unwrap();
     let keywordify = | name:String | name.replace(".","_").to_lowercase();
 

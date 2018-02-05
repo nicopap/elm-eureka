@@ -5,7 +5,7 @@
 //!
 //! This is not intended for use by external crate.
 //! I intend to only export the types that enter into
-//! the construction of the global parse tree (ElmModule)
+//! the construction of the global parse tree (`ElmModule`)
 
 pub type Location = u32;
 pub type Name = String;
@@ -264,10 +264,8 @@ pub fn into_tree<I>(declrs : I) -> CoalecedTopDeclr
             let doc = last_doc.take();
             ports.push(PortDeclaration {doc, name, annotation, location})
         },
-        TD::FunctionAnnotation(_, false, _, type_) => {
-            last_annotation = Some(type_);
-        },
-        TD::OperatorAnnotation(_, type_) => {
+        TD::FunctionAnnotation(_, false, _, type_)
+        | TD::OperatorAnnotation(_, type_) => {
             last_annotation = Some(type_);
         },
         TD::FunctionDeclr(location, name, arguments, body) => {

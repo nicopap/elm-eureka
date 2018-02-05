@@ -20,7 +20,7 @@ trait Descriptible {
 impl<T:Descriptible> Descriptible for [T] {
     fn describe(&self) -> String {
         match self.len() {
-            0 => format!("nothing"),
+            0 => "nothing".to_owned(),
             1 => self[0].describe(),
             2 => format!("{} and {}", self[0].describe(), self[1].describe()),
             _ => {
@@ -43,7 +43,7 @@ impl Descriptible for Record {
         let variable_descr =
             match self.variable_over {
                 Some(ref name) => format!("generic over {} and", name),
-                None => format!(""),
+                None => "".to_owned(),
             };
         format!("a record {} with ({})", variable_descr, self.fields.describe())
     }
@@ -62,8 +62,8 @@ impl Descriptible for Type {
                     name,
                     arguments.describe()
                 ),
-            Type::UnitType => format!("the unit type"),
-            Type::EmptyRecord => format!("an empty record"),
+            Type::UnitType => "the unit type".to_owned(),
+            Type::EmptyRecord => "an empty record".to_owned(),
             Type::Function(ref content) => format!(
                 "a function which arguments are ({})",
                 content.describe()
@@ -77,7 +77,7 @@ impl Descriptible for Type {
 
 pub fn main() {
     let file_to_read =
-        args().nth(1).unwrap_or(String::from("examples/elmjutsu-5k.elm"));
+        args().nth(1).unwrap_or_else(|| "examples/elmjutsu-5k.elm".to_owned());
     let file = File::open(file_to_read).unwrap();
     let char_stream = BufReader::new(file).chars().map(|x|x.unwrap());
     let mut parser = Parser::new(char_stream);

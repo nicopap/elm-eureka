@@ -162,9 +162,7 @@ impl fmt::Display for ElmToken {
             StringLit(ref content) => write!(f, "\"{}\"", content),
             Number(ref content) => write!(f, "{}", content),
             Char(ref content) => write!(f, "'{}'", content),
-            LetIndent => write!(f,""),
-            CaseIndent => write!(f,""),
-            Endcase => write!(f,""),
+            LetIndent | CaseIndent | Endcase => write!(f,""),
         }
     }
 }

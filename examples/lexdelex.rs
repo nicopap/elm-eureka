@@ -12,7 +12,8 @@ use elm_eureka::lexer::LexableIterator;
 
 pub fn main() {
     let file_to_read =
-        args().nth(1).unwrap_or(String::from("examples/elmjutsu-5k.elm"));
+        args().nth(1)
+            .unwrap_or_else(|| "examples/elmjutsu-5k.elm".to_owned());
     let file = File::open(file_to_read).unwrap();
     let reader = BufReader::new(file);
     let lex = reader.chars().map( |x| x.unwrap() ).lex().map(|(_p,t)| t);

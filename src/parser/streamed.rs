@@ -15,19 +15,19 @@ use self::ElmToken::Newline;
 pub type Loc<X> = (u32,X);
 
 macro_rules! matches {
-    (not $to_match:pat) => (|x| match x { $to_match => false, _ => true });
-    ($to_match:pat)     => (|x| match x { $to_match => true, _ => false });
+    (not $to_match:pat) => (|x| match *x { $to_match => false, _ => true });
+    ($to_match:pat)     => (|x| match *x { $to_match => true, _ => false });
 }
 
 // Shorthand to convert a simple Loc<ElmToken> stream into
 // something that the LALRPOP-generated parser accepts
 macro_rules! lalrpopify {
-    (@ filter_nl $in:ident)=>($in.filter(matches!(not &(_,Newline(_)))));
+    (@ filter_nl $in:ident)=>($in.filter(matches!(not (_,Newline(_)))));
     (@ filter_indent $in:ident)  =>($in.filter_indent());
     ($input:expr, $kind:ident) => ({
         let line_cut = $input
             .by_ref()
-            .take_while(matches!(not &(_,Newline(0))));
+            .take_while(matches!(not (_,Newline(0))));
         lalrpopify!(@ $kind line_cut)
             .map(|(line,token)| Ok(( line, token, line )))
     });
@@ -72,7 +72,7 @@ struct StageEof {
 /// it for parsing. In sum this is a lazy parser.
 ///
 /// To achieve laziness, efficiency and safety, I use typing
-/// to *mark* the StreamParser `stage`. The `stage` is a
+/// to *mark* the `StreamParser` `stage`. The `stage` is a
 /// structure that holds what part of the tree is currently
 /// parsed and hints at what is remaining to be parsed.
 ///
@@ -90,17 +90,17 @@ struct StageEof {
 /// * It divides the parser in logic units that follows
 ///   what information you'd want to extract out of a file.
 ///
-/// Currently, the StreamParser has the following stages:
+/// Currently, the `StreamParser` has the following stages:
 ///
-/// 1. ModuleDeclr: `next_step` will consume the module
+/// 1. `ModuleDeclr`: `next_step` will consume the module
 ///    declaration.
 ///
-/// 2. ModuleDoc: `next_step` will consume the module
+/// 2. `ModuleDoc`: `next_step` will consume the module
 ///    doc string (if it exists).
 ///
-/// 3. Imports: `next_step` will consume all the imports
+/// 3. `Imports`: `next_step` will consume all the imports
 ///
-/// 4. TopDeclrs: parses the rest of the file until EOF.
+/// 4. `TopDeclrs`: parses the rest of the file until EOF.
 ///    (currently only parses type declarations)
 ///
 /// 5. EOF: Nothing more to be parsed.
@@ -119,7 +119,7 @@ trait IntoParsed: Iterator<Item=Loc<ElmToken>> {
     {
         use self::ElmToken::{Type, Name, Alias};
 
-        let is_newline: fn(&Loc<ElmToken>)->bool = matches!(&(_,Newline(_)));
+        let is_newline: fn(&Loc<ElmToken>)->bool = matches!((_,Newline(_)));
         let remove_dup_newlines: CoalSig<Loc<ElmToken>> = |prev,cur| {
             match (prev,cur) {
                 ((_,Newline(_)), latest@(_,Newline(_))) => Ok(latest),
@@ -188,17 +188,11 @@ impl<I:Iterator<Item=Loc<ElmToken>>> StreamParser<I,StageModuleDoc> {
 impl<I:Iterator<Item=Loc<ElmToken>>> StreamParser<I,StageImports> {
     fn next_step(mut self) -> StreamParser<I,StageTopDeclrs> {
         let mut module_imports : Vec<tree::ElmImport> = Vec::new();
-        loop {
-            match self.input.peek() {
-                Some(&(_, ElmToken::Import)) => {
-                    let cur_import
-                        = parse_Import(lalrpopify!(self.input, filter_nl))
-                            .expect("Parsing error in imports");
-
-                    module_imports.push(cur_import);
-                },
-                _ => break
-            }
+        while let Some(&(_, ElmToken::Import)) = self.input.peek() {
+            let cur_import
+                = parse_Import(lalrpopify!(self.input, filter_nl))
+                    .expect("Parsing error in imports");
+            module_imports.push(cur_import);
         }
         let module_declr = self.stage.module_declr;
         let module_doc = self.stage.module_doc;
@@ -214,7 +208,7 @@ impl<I:Iterator<Item=Loc<ElmToken>>> StreamParser<I,StageTopDeclrs> {
     fn next_step(mut self) -> StreamParser<I,StageEof> {
         let mut top_levels = Vec::new();
         loop {
-            match parse_TopDeclr( lalrpopify!(self.input, filter_indent)) {
+            match parse_TopDeclr(lalrpopify!(self.input, filter_indent)) {
                 Ok(val) => top_levels.push(val),
                 Err(_) => break // TODO: handle this more gracefully
             };
@@ -387,10 +381,10 @@ impl<I> Parser<I>
                 entries
                     .iter()
                     .map(|entry| match *entry {
-                        EE::Name(ref name) => name.as_ref(),
-                        EE::Operator(ref op) => op.as_ref(),
-                        EE::WithConstructors(ref name,_) => name.as_ref(),
-                        EE::WithAllConstructors(ref name) => name.as_ref(),
+                        EE::WithConstructors(ref name,_)
+                        | EE::Name(ref name)
+                        | EE::WithAllConstructors(ref name)
+                        | EE::Operator(ref name) => name.as_ref(),
                     })
                     .collect::<Vec<&str>>()
             },

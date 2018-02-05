@@ -99,7 +99,7 @@ fn consume_block_comment<I>(input: &mut Peekable<I>) -> (Option<ElmToken>, u32)
         }
         (None, nl_consumed)
     } else {
-        while let Some(c) = input.next() {
+        for c in input {
             nl_consumed += (c == '\n') as u32;
             if last == '{' && c == '-' {
                 depth += 1
@@ -121,8 +121,7 @@ fn consume_operator<I>(input: &mut Peekable<I>, from: char) -> ElmToken
     consume_into(input, &mut into, is_operator);
     match into.as_ref() {
         ".." => return ElmToken::Ellision,
-        "λ" => return ElmToken::Lambda,
-        "\\" => return ElmToken::Lambda,
+        "λ" | "\\" => return ElmToken::Lambda,
         "->" => return ElmToken::RArrow,
         "|" => return ElmToken::Pipe,
         "=" => return ElmToken::Assign,
@@ -150,8 +149,7 @@ fn consume_name<I>(input: &mut Peekable<I>, from: char) -> ElmToken
         "else" => return ElmToken::Else,
         "type" => return ElmToken::Type,
         "infixr" => return ElmToken::Infixr,
-        "infixl" => return ElmToken::Infixl,
-        "infix" => return ElmToken::Infixl, //infix implies infixl
+        "infixl" | "infix" => return ElmToken::Infixl,//infix implies infixl
         "port" => return ElmToken::Port,
         "where" => return ElmToken::Where,
         "let" => return ElmToken::Let,
@@ -228,7 +226,7 @@ fn consume_string(input: &mut Iterator<Item=char>)
     let mut into = String::new();
     let mut prev_is_escape = false;
     let mut nl_consumed = 0;
-    while let Some(c) = input.next() {
+    for c in input {
         nl_consumed += (c == '\n') as u32;
         if c == '"' && !prev_is_escape {
             return (ElmToken::StringLit(into), nl_consumed)

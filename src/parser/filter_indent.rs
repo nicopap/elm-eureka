@@ -40,7 +40,7 @@ enum IndentTrigger {Let, Of}
 /// An iterator adaptator that turns Newline tokens into meaningfull
 /// indentation for the parser to consume.
 ///
-/// The FilterIndent keeps as internal state the indent stack. The
+/// The `FilterIndent` keeps as internal state the indent stack. The
 /// indent stack keeps track of meaningfull indentations for when
 /// they need to be aligned, and for inserting "endcase" tokens when
 /// necessary (nested `case` expressions). The `indent_stack` not only
@@ -110,8 +110,8 @@ impl<I:Iterator<Item=Loc<ElmToken>>> FilterIndent<I> {
             let mut matching_index = stack_last;
             loop {
                 let current_indenter
-                    = self.indent_stack.get(matching_index).unwrap();
-                match *current_indenter {
+                    = self.indent_stack[matching_index];
+                match current_indenter {
                     Case(indent) if indent == indent_level => {
                         let line = self.last_loc;
                         self.buffer_stack.push((line, ElmToken::CaseIndent));
@@ -195,12 +195,11 @@ impl<I:Iterator<Item=Loc<ElmToken>>> Iterator for FilterIndent<I> {
                     self.indent_trigger = Some(IT::Let);
                     self.indent_stack.push(IE::Delimiter);
                     match self.input.peek() {
-                        Some(&(_,Newline(_))) => {},
+                        Some(&(_,Newline(_))) | None => {},
                         Some(_) => if let Some(alignement) = let_alignement {
                             self.indent_stack.push(IE::Let(alignement));
                             self.indent_trigger = None;
                         },
-                        None => {},
                     };
                     return Some((line,Let));
                 },

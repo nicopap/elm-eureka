@@ -18,16 +18,19 @@ use elm_eureka::parser::tree;
 
 //There is a race condition somehow????
 //FIXME: if there is more than 1 thread, stuff breaks
-const NTHREAD:i32=1;
+const NTHREAD:usize=1;
+
+struct ModuleMessage {
+    module_name: String,
+    name: String,
+    doc: Option<String>,
+    exports: tree::ExportList,
+    imports: Vec<tree::ElmImport>,
+}
 
 fn parse_and_feedback(
     receive: Receiver<Option<(PathBuf, String)>>,
-    send: Sender<Option<(String,
-                         String,
-                         Option<String>,
-                         tree::ExportList,
-                         Vec<tree::ElmImport>
-                        )>>
+    send: Sender<Option<ModuleMessage>>
 ) {
     while let Some((source_path, module_name)) = receive.recv().unwrap() {
         let file = File::open(source_path).unwrap();
@@ -35,9 +38,11 @@ fn parse_and_feedback(
         let mut parser = Parser::new(char_stream);
         let exports = parser.module_exports().clone();
         let imports = parser.imports().to_vec();
-        let name = String::from(parser.module_name());
+        let name = parser.module_name().to_owned();
         let doc = parser.module_doc().clone();
-        send.send(Some((module_name, name,doc,exports,imports))).unwrap();
+        send.send(
+            Some(ModuleMessage{module_name, name,doc,exports,imports})
+        ).unwrap();
     }
     send.send(None).unwrap();
 }
@@ -57,27 +62,25 @@ pub fn main() {
     for _ in 0..NTHREAD {
         let sender_copy = send_processed.clone();
         let (send_paths, receiver) = channel();
-        thread::spawn(move || parse_and_feedback(receiver, sender_copy));
+        thread::spawn(|| parse_and_feedback(receiver, sender_copy));
         send_channels.push(send_paths);
     }
-    let mut i = 0i32;
-    for (module_name, source_path) in sources {
+    for (i, (module_name, source_path)) in sources.enumerate() {
         send_channels
-            .index_mut((i % NTHREAD) as usize)
+            .index_mut(i % NTHREAD)
             .send(Some((source_path, module_name.clone())))
             .unwrap();
-        i += 1;
     }
     for chan in send_channels {
         chan.send(None).unwrap();
     }
-    while let Some((module, name,doc,exports,imports))
+    while let Some(ModuleMessage{module_name:module, name,doc,exports,imports})
         = receive_processed.recv().unwrap()
     {
         let module_doc : String =
             doc .clone()
                 .map(|x| x.chars().take_while(|&c| c != '\n').collect())
-                .unwrap_or(String::from("No docstrings :("));
+                .unwrap_or_else(|| "No docstrings :(".to_owned());
 
         let module_name = &name;
         let module_exports = match exports {
