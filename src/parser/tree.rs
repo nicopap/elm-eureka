@@ -39,6 +39,7 @@ pub struct ElmImport {
     pub location: u32,
 }
 
+// TODO: use explicit records with fields instead of tuples
 #[derive(Debug,Clone)]
 pub enum TopDeclr {
     OperPriority(OperPriority),
@@ -49,6 +50,12 @@ pub enum TopDeclr {
     OperatorAnnotation(Name, Type),
     FunctionDeclr(Location, Name, Vec<Pattern>, Expression),
     OperatorDeclr(Location, Name, Vec<Pattern>, Expression),
+    OperatorPrioDeclr {
+        location: Location,
+        function: Name,
+        name: Name,
+        priority: OperPriority,
+    },
 }
 
 #[derive(Debug,Clone)]
@@ -109,7 +116,7 @@ pub struct TypeDeclaration {
 }
 
 #[derive(Debug,Clone)]
-pub enum Associativity { Left, Right }
+pub enum Associativity { Left, Right, Non }
 
 #[derive(Debug,Clone)]
 pub struct OperPriority {
@@ -284,7 +291,12 @@ pub fn into_tree<I>(declrs : I) -> CoalecedTopDeclr
                 annotation, doc, name, kind, arguments, location, body,
             })
         },
+        TD::OperatorPrioDeclr { .. } => {
+            unimplemented!() //TODO: elm 0.19 feature
+        },
     } }
+    // TODO: add documentation to infix operators created with the `infix`
+    // syntax (copy the one from the corresponding function).
     CoalecedTopDeclr {ports, infixities, functions, types}
 }
 

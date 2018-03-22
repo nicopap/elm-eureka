@@ -76,6 +76,41 @@ pub TopDeclr: TopDeclr = {
             operator : operator,
         }),
 
+    "infix" <priority:NumberTok> <operator:OperatorTok> =>
+        TopDeclr::OperPriority(OperPriority {
+            associativity: Associativity::Non,
+            priority:
+                // The lexer can potentially generate Number tokens that
+                // are not convertible to u8, we "guard" against that
+                // (this should be temporary untill I figure out a
+                // better error handling system).
+                u8::from_str(priority.as_str())
+                    .expect("Error reading priority of infix operator"),
+            operator : operator,
+        }),
+
+    <location:@L>
+    "infix" <kind:NameTok> <priority:NumberTok> "(" <name:OperatorTok> ")"
+    "=" <function:NameTok> => {
+        let associativity = match kind.as_ref() {
+            "left" => Associativity::Left,
+            "right" => Associativity::Right,
+            "non" => Associativity::Non,
+            _ => panic!("Invalid operator priority qualification :("),
+        };
+        let priority = OperPriority {
+            associativity, operator: name.clone(),
+            priority:
+                // The lexer can potentially generate Number tokens that
+                // are not convertible to u8, we "guard" against that
+                // (this should be temporary untill I figure out a
+                // better error handling system).
+                u8::from_str(priority.as_str())
+                    .expect("Error reading priority of infix operator"),
+        };
+        TopDeclr::OperatorPrioDeclr { priority, function, location, name }
+    },
+
     <loc:@L>
     "type" <name:NameTok> <type_variables:NameTok*> "="
     <first_alt:(<NameTok> <EnclosedType*>)>
@@ -433,6 +468,7 @@ extern {
         "alias" => tokens::ElmToken::Alias,
         "infixr" => tokens::ElmToken::Infixr,
         "infixl" => tokens::ElmToken::Infixl,
+        "infix" => tokens::ElmToken::Infix,
         "port" => tokens::ElmToken::Port,
         "where" => tokens::ElmToken::Where,
         "let" => tokens::ElmToken::Let,

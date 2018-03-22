@@ -88,6 +88,8 @@ pub enum ElmToken {
     Infixr,
     /// the `infixl` keyword.
     Infixl,
+    /// the `infix` keyword.
+    Infix,
     /// module qualifier at the beginning of the file
     /// or function qualifier in port modules.
     Port,
@@ -155,6 +157,7 @@ impl fmt::Display for ElmToken {
             Alias => write!(f, "alias"),
             Infixr => write!(f, "infixr"),
             Infixl => write!(f, "infixl"),
+            Infix => write!(f, "infix"),
             Port => write!(f, "port"),
             Where => write!(f, "where"),
             Let => write!(f, "let"),
@@ -202,6 +205,7 @@ impl fmt::Debug for ElmToken {
             Alias => write!(f, "<alias>"),
             Infixr => write!(f, "<infixr>"),
             Infixl => write!(f, "<infixl>"),
+            Infix => write!(f, "<infix>"),
             Port => write!(f, "<port>"),
             Where => write!(f, "<where>"),
             Let => write!(f, "<let>"),

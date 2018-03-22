@@ -149,7 +149,8 @@ fn consume_name<I>(input: &mut Peekable<I>, from: char) -> ElmToken
         "else" => return ElmToken::Else,
         "type" => return ElmToken::Type,
         "infixr" => return ElmToken::Infixr,
-        "infixl" | "infix" => return ElmToken::Infixl,//infix implies infixl
+        "infixl" => return ElmToken::Infixl,
+        "infix" => return ElmToken::Infix,
         "port" => return ElmToken::Port,
         "where" => return ElmToken::Where,
         "let" => return ElmToken::Let,
@@ -161,11 +162,8 @@ fn consume_name<I>(input: &mut Peekable<I>, from: char) -> ElmToken
 
 /// Consumes a number literal. A number literal can be one of the
 /// following:
-/// ```ignore
-/// x[0-9a-fA-F]+
-/// [0-9]*(.[0-9]+)?(e[-+]?[0-9]+)?
-/// ```
-/// Currently, also accepts [0-9]x[0-9a-fA-F]+
+/// `x[0-9a-fA-F]+` and `[0-9]*(.[0-9]+)?(e[-+]?[0-9]+)?`
+/// Currently, also accepts `[0-9]x[0-9a-fA-F]+`
 fn consume_number<I>(input: &mut Peekable<I>, from: char) -> ElmToken
     where I: Iterator<Item=char>
 {
