@@ -65,6 +65,9 @@ pub fn info(root_dir : &Path) -> Result<PackageInfo, Box<Error>> {
             .flat_map(|ref source_subdir|
                 all_modules(&project_dir.join(source_subdir))
                     .into_iter()
+                    .filter(|&(_, ref path)|
+                        path.extension().map(|x| x == "elm").unwrap_or(false)
+                    )
                     .map(|(module_name,source)|
                         (module_name, strip_x!(source, project_dir))
                     )
