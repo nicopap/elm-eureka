@@ -168,6 +168,17 @@ impl<I:Iterator<Item=Loc<ElmToken>>> StreamParser<I,StageModuleDoc> {
                                 now, I get something different!
                                 : {:?}", anyelse),
                 };
+                match self.input.next() {
+                    Some((_, ElmToken::Newline(_))) => {},
+                    None =>
+                        panic!("There is no source following a module doc \
+                                comment! This is malformed code I should \
+                                be able to handle but doens't yet."),
+                    anyelse =>
+                        panic!("A new line should follow doc comment, yet \
+                               something else was there instead \
+                                : {:?}", anyelse),
+                };
                 StreamParser {
                     input: self.input,
                     stage: StageImports{module_declr, module_doc},
