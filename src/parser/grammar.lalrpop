@@ -54,59 +54,59 @@ pub Import: ElmImport = {
 };
 
 pub TopDeclr: TopDeclr = {
-    "infixr" <priority:NumberTok> <operator:OperatorTok> =>
+    "infixr" <precedence:NumberTok> <operator:OperatorTok> =>
         TopDeclr::OperPriority(OperPriority {
             associativity: Associativity::Right,
-            priority:
-                u8::from_str(priority.as_str())
-                    .expect("Error reading priority of infix operator"),
+            precedence:
+                u8::from_str(precedence.as_str())
+                    .expect("Error reading precedence of infix operator"),
             operator : operator,
         }),
 
-    "infixl" <priority:NumberTok> <operator:OperatorTok> =>
+    "infixl" <precedence:NumberTok> <operator:OperatorTok> =>
         TopDeclr::OperPriority(OperPriority {
             associativity: Associativity::Left,
-            priority:
+            precedence:
                 // The lexer can potentially generate Number tokens that
                 // are not convertible to u8, we "guard" against that
                 // (this should be temporary untill I figure out a
                 // better error handling system).
-                u8::from_str(priority.as_str())
-                    .expect("Error reading priority of infix operator"),
+                u8::from_str(precedence.as_str())
+                    .expect("Error reading precedence of infix operator"),
             operator : operator,
         }),
 
-    "infix" <priority:NumberTok> <operator:OperatorTok> =>
+    "infix" <precedence:NumberTok> <operator:OperatorTok> =>
         TopDeclr::OperPriority(OperPriority {
             associativity: Associativity::Non,
-            priority:
+            precedence:
                 // The lexer can potentially generate Number tokens that
                 // are not convertible to u8, we "guard" against that
                 // (this should be temporary untill I figure out a
                 // better error handling system).
-                u8::from_str(priority.as_str())
-                    .expect("Error reading priority of infix operator"),
+                u8::from_str(precedence.as_str())
+                    .expect("Error reading precedence of infix operator"),
             operator : operator,
         }),
 
     <location:@L>
-    "infix" <kind:NameTok> <priority:NumberTok> "(" <name:OperatorTok> ")"
+    "infix" <kind:NameTok> <precedence:NumberTok> "(" <name:OperatorTok> ")"
     "=" <function:NameTok> => {
         let associativity = match kind.as_ref() {
             "left" => Associativity::Left,
             "right" => Associativity::Right,
             "non" => Associativity::Non,
-            _ => panic!("Invalid operator priority qualification :("),
+            _ => panic!("Invalid operator precedence qualification :("),
         };
         let priority = OperPriority {
             associativity, operator: name.clone(),
-            priority:
+            precedence:
                 // The lexer can potentially generate Number tokens that
                 // are not convertible to u8, we "guard" against that
                 // (this should be temporary untill I figure out a
                 // better error handling system).
-                u8::from_str(priority.as_str())
-                    .expect("Error reading priority of infix operator"),
+                u8::from_str(precedence.as_str())
+                    .expect("Error reading precedence of infix operator"),
         };
         TopDeclr::OperatorPrioDeclr { priority, function, location, name }
     },
@@ -306,17 +306,20 @@ EsacOpenExpression: Expression = {
     "if" <ife:Expression>
     "then" <thene:Expression>
     "else" <elsee:EsacExpression> =>
-        Expression::IfThenElse(
-            Box::new(ife),
-            Box::new(thene),
-            Box::new(elsee)
-        ),
+        Expression::IfThenElse {
+            condition: Box::new(ife),
+            then_branch: Box::new(thene),
+            else_branch: Box::new(elsee)
+        },
 
     "let" <init:(<LetDeclaration> "let indent")*> <last:LetDeclaration>
     "in" <in_expr:EsacExpression> => {
         let mut declarations = init;
         declarations.push(last);
-        Expression::LetIn(declarations, Box::new(in_expr))
+        Expression::LetIn {
+            declarations,
+            expression: Box::new(in_expr)
+        }
     },
 
     ApplicationExpression => <>,
@@ -338,17 +341,20 @@ OpenExpression: Expression = {
     "if" <ife:Expression>
     "then" <thene:Expression>
     "else" <elsee:Expression> =>
-        Expression::IfThenElse(
-            Box::from(ife),
-            Box::from(thene),
-            Box::from(elsee)
-        ),
+        Expression::IfThenElse {
+            condition: Box::new(ife),
+            then_branch: Box::new(thene),
+            else_branch: Box::new(elsee)
+        },
 
     "let" <init:(<LetDeclaration> "let indent")*> <last:LetDeclaration>
     "in" <in_expr:Expression> => {
         let mut declarations = init;
         declarations.push(last);
-        Expression::LetIn(declarations, Box::from(in_expr))
+        Expression::LetIn {
+            declarations,
+            expression: Box::new(in_expr)
+        }
     },
 
     ApplicationExpression => <>,
@@ -365,8 +371,9 @@ ApplicationExpression: Expression = {
 };
 
 ClosedExpression: Expression = {
-    "{" <(<NameTok> "|")?> <Comma<(<NameTok> "=" <Expression>)>> "}" =>
-        Expression::Record(<>),
+    "{" <updates:(<NameTok> "|")?>
+    <fields:Comma<(<NameTok> "=" <Expression>)>> "}" =>
+        Expression::Record{<>},
 
     "[" <Comma<Expression>> "]" =>
         Expression::List(<>),

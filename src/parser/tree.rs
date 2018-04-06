@@ -71,8 +71,8 @@ pub struct FunctionDeclaration {
     pub name: Name,
     pub kind: FunctionKind,
     pub arguments: Vec<Pattern>,
-    body: Expression,
-    location: u32,
+    pub body: Expression,
+    pub location: u32,
 }
 
 #[derive(Debug,Clone)]
@@ -80,7 +80,7 @@ pub struct PortDeclaration {
     pub annotation: Type,
     pub doc: Option<String>,
     pub name: Name,
-    location: u32,
+    pub location: u32,
 }
 
 #[derive(Debug,Clone)]
@@ -112,7 +112,7 @@ pub struct TypeDeclaration {
     pub type_variables: Vec<Name>,
     pub genre: TypeGenre,
     pub doc: Option<String>,
-    location: u32,
+    pub location: u32,
 }
 
 #[derive(Debug,Clone)]
@@ -121,7 +121,7 @@ pub enum Associativity { Left, Right, Non }
 #[derive(Debug,Clone)]
 pub struct OperPriority {
     pub associativity: Associativity,
-    pub priority: u8,
+    pub precedence: u8,
     pub operator: Operator,
 }
 
@@ -174,7 +174,10 @@ pub enum Pattern {
 
 #[derive(Debug,Clone)]
 pub enum Expression {
-    Record(Option<Name>, Vec<(Name, Expression)>),
+    Record {
+        updates: Option<Name>,
+        fields: Vec<(Name, Expression)>,
+    },
     List(Vec<Expression>),
     Tuple(Vec<Expression>),
     StringLit(String),
@@ -183,9 +186,16 @@ pub enum Expression {
     UnitType,
     EmptyRecord,
     EmptyList,
-    IfThenElse(Box<Expression>, Box<Expression>, Box<Expression>),
-    LetIn(Vec<LetDeclaration>, Box<Expression>),
-    /// case <condition> of (branches)
+    IfThenElse {
+        condition: Box<Expression>,
+        then_branch: Box<Expression>,
+        else_branch: Box<Expression>,
+    },
+    LetIn {
+        declarations: Vec<LetDeclaration>,
+        expression: Box<Expression>
+    },
+    /// case `condition` of (`branches`)
     CaseOf {
         condition: Box<Expression>,
         branches: Vec<(u32, Pattern, Expression)>,
@@ -195,15 +205,18 @@ pub enum Expression {
         body: Box<Expression>,
         location: u32,
     },
-    /// <(<Expression> <op>) (<Expression> <op>) ... <op>)> <trailing>
+    /// [(`Expression` `op`) (`Expression` `op`) ... `op`)] `trailing`
     InfixApplication {
         prefixes: Vec<(Expression, Operator)>,
         trailing: Box<Expression>,
     },
+    /// A function application the list size is always equal or greater than
+    /// 2, includes the function and the various arguments applied to it.
     Application(Vec<Expression>),
     Variable(Name),
+    /// An operator surounded by `()` to make it prefix. Such as `(+)`
     PrefixOperator(Operator),
-    /// i16 is the arrity of the constructor
+    /// the argument value is the size of the resulting tuple
     TupleConstructor(i16),
 }
 
