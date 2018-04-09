@@ -137,6 +137,8 @@ extern crate serde_json;
 extern crate itertools;
 extern crate walkdir;
 #[cfg(test)] #[macro_use] extern crate pretty_assertions;
+#[macro_use] extern crate quick_error;
+extern crate lalrpop_util;
 
 pub mod packages_reader;
 mod tokens;

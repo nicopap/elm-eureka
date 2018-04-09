@@ -80,9 +80,9 @@ pub fn main() {
         args().nth(1).unwrap_or_else(|| "examples/elmjutsu-5k.elm".to_owned());
     let file = File::open(file_to_read).unwrap();
     let char_stream = BufReader::new(file).chars().map(|x|x.unwrap());
-    let mut parser = Parser::new(char_stream);
+    let parser = Parser::new(char_stream);
     for &tree::TypeDeclaration { ref name, ref genre, .. }
-    in parser.types() {
+    in &parser.into_parse_tree().types {
         match *genre {
             tree::TypeGenre::Alias(ref type_) => {
                 println!("type alias {}, is:\n  {}", name, type_.describe());

@@ -21,17 +21,19 @@ use self::tree::{
 
 grammar;
 
-pub ModuleDeclr: ModuleDeclr = {
+pub ModuleDeclr: Option<ModuleDeclr> = {
     NameTok "module" <name:NameTok>
     "where" "{" NameTok "=" NameTok ("," NameTok "=" NameTok)* "}"
     "exposing" <exports:ExportList> =>
-        ModuleDeclr { <> },
+        Some(ModuleDeclr { <> }),
 
     "port" "module" <name:NameTok> "exposing" <exports:ExportList> =>
-        ModuleDeclr { <> },
+        Some(ModuleDeclr { <> }),
 
     "module" <name:NameTok> "exposing" <exports:ExportList> =>
-        ModuleDeclr { <> },
+        Some(ModuleDeclr { <> }),
+     =>
+        None,
 };
 
 ExportList: ExportList = {

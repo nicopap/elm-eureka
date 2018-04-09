@@ -21,7 +21,7 @@ const NTHREAD:usize=4;
 
 struct ModuleMessage {
     module_name: String,
-    name: String,
+    name: Option<String>,
     doc: Option<String>,
     exports: tree::ExportList,
     imports: Vec<tree::ElmImport>,
@@ -91,7 +91,7 @@ pub fn main() {
                 let module_imports = format!("{:?}", imports);
                 println!("
                     #### {} ####
-                    name: {}
+                    name: {:?}
                     exports: {}
                     has doc: {}
                     imports: {}

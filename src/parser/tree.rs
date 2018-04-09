@@ -231,7 +231,7 @@ pub struct LetDeclaration {
 
 #[derive(Debug,Clone)]
 pub struct ElmModule {
-    pub name: Name,
+    pub name: Option<Name>,
     pub exports: ExportList,
     pub doc: Option<String>,
     pub imports: Vec<ElmImport>,
