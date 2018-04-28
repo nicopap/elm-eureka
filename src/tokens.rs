@@ -8,6 +8,9 @@
 
 use std::fmt;
 
+
+pub type Location=((u32,u16),(u32,u16));
+
 /// Tokens that you can find in a source file.
 ///
 /// This is not based on any elm specification, just my

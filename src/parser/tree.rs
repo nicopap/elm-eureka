@@ -7,7 +7,7 @@
 //! I intend to only export the types that enter into
 //! the construction of the global parse tree (`ElmModule`)
 
-pub type Location = u32;
+pub type Location = (u32, u16);
 pub type Name = String;
 pub type Operator = String;
 
@@ -36,7 +36,7 @@ pub struct ElmImport {
     pub global_name: Name,
     pub local_name: Option<Name>,
     pub exposes: Option<ExportList>,
-    pub location: u32,
+    pub location: Location,
 }
 
 // TODO: use explicit records with fields instead of tuples
@@ -72,7 +72,7 @@ pub struct FunctionDeclaration {
     pub kind: FunctionKind,
     pub arguments: Vec<Pattern>,
     pub body: Expression,
-    pub location: u32,
+    pub location: Location,
 }
 
 #[derive(Debug,Clone)]
@@ -80,7 +80,7 @@ pub struct PortDeclaration {
     pub annotation: Type,
     pub doc: Option<String>,
     pub name: Name,
-    pub location: u32,
+    pub location: Location,
 }
 
 #[derive(Debug,Clone)]
@@ -112,7 +112,7 @@ pub struct TypeDeclaration {
     pub type_variables: Vec<Name>,
     pub genre: TypeGenre,
     pub doc: Option<String>,
-    pub location: u32,
+    pub location: Location,
 }
 
 #[derive(Debug,Clone)]
@@ -198,12 +198,12 @@ pub enum Expression {
     /// case `condition` of (`branches`)
     CaseOf {
         condition: Box<Expression>,
-        branches: Vec<(u32, Pattern, Expression)>,
+        branches: Vec<(Location, Pattern, Expression)>,
     },
     Lambda {
         arguments: Vec<Pattern>,
         body: Box<Expression>,
-        location: u32,
+        location: Location,
     },
     /// [(`Expression` `op`) (`Expression` `op`) ... `op`)] `trailing`
     InfixApplication {
@@ -226,7 +226,7 @@ pub struct LetDeclaration {
     pub name: Option<Name>,
     pub arguments: Vec<Pattern>,
     pub body: Expression,
-    pub location: u32,
+    pub location: Location,
 }
 
 #[derive(Debug,Clone)]

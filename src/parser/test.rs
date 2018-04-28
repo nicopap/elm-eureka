@@ -34,8 +34,9 @@ use super::tree::ElmModule;
     let source_txt = include_str!("elm_samples/no_head.elm").to_owned();
     let ElmModule {name, doc, mut imports, types, mut functions,
         infixities, ports, ..} = Parser::new(source_txt.chars()).into_parse_tree();
-    let only_function = functions.pop().unwrap();
-    imports.pop().unwrap();
+    let only_function = functions.pop().expect(
+        "There should be a function in the hello world file");
+    imports.pop().expect("There should be an import in the hello world file");
     assert_eq!(name, None);
     assert_eq!(doc, None);
     assert_eq!(functions.len(), 0);

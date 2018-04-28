@@ -19,6 +19,7 @@ lalrpop-util = "0.14.0"
 itertools = "0.7.6"
 walkdir = "2"
 quick-error = "1.2.1"
+fxhash = "0.2.1"
 
 [dev-dependencies]
 pretty_assertions = "0.4.0"

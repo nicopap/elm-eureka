@@ -7,7 +7,7 @@ use itertools::{Coalesce,Itertools};
 use super::grammar::{parse_ModuleDeclr,parse_Import, parse_TopDeclr};
 use super::tree;
 use super::filter_indent::TokenIterator;
-use ::tokens::{ElmToken,LexError};
+use ::tokens::{ElmToken,LexError,Location};
 use ::lexer::{LexableIterator,Lexer};
 use self::ElmToken::Newline;
 
@@ -27,13 +27,15 @@ quick_error! {
             description("The source file ends after the module documentation \
             comment")
         }
-        LalrpopError(err: LalrpopError<u32,ElmToken,LexError>) {
+        LalrpopError(err: LalrpopError<(u32,u16),ElmToken,LexError>) {
             from()
         }
     }
 }
 
-pub type Loc<X> = (u32,X);
+pub type Loc<X> = (Location,X);
+
+const INIT_LOC : ((u32,u16),(u32,u16)) = ((0,0),(0,0));
 
 macro_rules! matches {
     (not $to_match:pat) => (|x| match *x { $to_match => false, _ => true });
@@ -44,13 +46,13 @@ macro_rules! matches {
 // something that the LALRPOP-generated parser accepts
 macro_rules! lalrpopify {
     (@ filter_nl $in:ident)=>($in.filter(matches!(not (_,Newline(_)))));
-    (@ filter_indent $in:ident)  =>($in.filter_indent());
+    (@ filter_indent $in:ident)  =>($in.filter_indent(INIT_LOC));
     ($input:expr, $kind:ident) => ({
         let line_cut = $input
             .by_ref()
             .take_while(matches!(not (_,Newline(0))));
         lalrpopify!(@ $kind line_cut)
-            .map(|(line,token)| Ok(( line, token, line )))
+            .map(|(location,token)| Ok(( location.0, token, location.1 )))
     });
 }
 

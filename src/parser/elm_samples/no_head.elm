@@ -1,4 +1,10 @@
 import Html exposing (text)
 
-main =
+{-|Moduledoc
+
+
+-}
+
+{-|Fundoc -}
+main {-args-} =
   text "Hello, World!"

@@ -132,10 +132,12 @@
 //! 	are trivial generic implementations with no claims of fitness for any
 //! 	purpose.
 #![feature(test)]
+
 #[cfg(test)] extern crate test;
 extern crate serde_json;
 extern crate itertools;
 extern crate walkdir;
+extern crate fxhash;
 #[cfg(test)] #[macro_use] extern crate pretty_assertions;
 #[macro_use] extern crate quick_error;
 extern crate lalrpop_util;

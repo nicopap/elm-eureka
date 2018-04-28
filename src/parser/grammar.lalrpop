@@ -55,6 +55,7 @@ pub Import: ElmImport = {
     <exposes:("exposing" <ExportList>)?> => ElmImport{ <> },
 };
 
+
 pub TopDeclr: TopDeclr = {
     "infixr" <precedence:NumberTok> <operator:OperatorTok> =>
         TopDeclr::OperPriority(OperPriority {
@@ -443,7 +444,7 @@ Comma<T>: Vec<T> = {
 };
 
 extern {
-    type Location = u32;
+    type Location = (u32,u16);
     type Error = tokens::LexError;
 
     enum tokens::ElmToken {
