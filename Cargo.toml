@@ -20,6 +20,7 @@ itertools = "0.7.6"
 walkdir = "2"
 quick-error = "1.2.1"
 fxhash = "0.2.1"
+string-interner = "0.6.3"
 
 [dev-dependencies]
 pretty_assertions = "0.4.0"

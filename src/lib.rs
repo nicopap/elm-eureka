@@ -138,6 +138,7 @@ extern crate serde_json;
 extern crate itertools;
 extern crate walkdir;
 extern crate fxhash;
+extern crate string_interner;
 #[cfg(test)] #[macro_use] extern crate pretty_assertions;
 #[macro_use] extern crate quick_error;
 extern crate lalrpop_util;

@@ -156,7 +156,7 @@ impl<I: Iterator<Item=Loc<ElmToken>>> StreamParser<I> {
                         Some(content),
                     anyelse =>
                         panic!("read a DocComment with a peek, \
-                                now, I get something different!
+                                now, I get something different! \
                                 : {:?}", anyelse),
                 };
                 // Consume newline after the doc comment (like a lalrpopify!
@@ -185,12 +185,15 @@ impl<I: Iterator<Item=Loc<ElmToken>>> StreamParser<I> {
     fn parse_declarations(&mut self) -> Result<(),ParserError> {
         self.stage = ParserStage::FullyParsed;
         loop {
-            match parse_TopDeclr(lalrpopify!(self.input, filter_indent)) {
-                Ok(val) => self.top_levels.push(val),
-                Err(_) => break // TODO: handle this more gracefully
+            if self.input.peek().is_none() {
+                break Ok(())
+            };
+            let next_toplevel_lex = lalrpopify!(self.input, filter_indent);
+            match parse_TopDeclr(next_toplevel_lex) {
+                Ok(val)        => self.top_levels.push(val),
+                Err(lrp_error) => break Err(lrp_error.into()),
             };
         }
-        Ok(())
     }
 
     /// Parse the file up to the given stage, or not at all if that stage
