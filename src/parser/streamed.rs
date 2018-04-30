@@ -4,7 +4,7 @@ use std::iter::{SkipWhile,Peekable};
 use lalrpop_util::ParseError as LalrpopError;
 use itertools::{Coalesce,Itertools};
 
-use super::grammar::{parse_ModuleDeclr,parse_Import, parse_TopDeclr};
+use super::grammar::{ModuleDeclrParser,ImportParser, TopDeclrParser};
 use super::tree;
 use super::filter_indent::TokenIterator;
 use ::tokens::{ElmToken,LexError,Location};
@@ -143,7 +143,7 @@ impl<I: Iterator<Item=Loc<ElmToken>>> StreamParser<I> {
         };
         self.stage = ParserStage::ModuleDoc;
         self.module_declr = if has_module_declaration {
-               parse_ModuleDeclr(lalrpopify!(self.input, filter_nl))?
+               ModuleDeclrParser::new().parse(lalrpopify!(self.input, filter_nl))?
         } else { None };
         Ok(())
     }
@@ -176,7 +176,7 @@ impl<I: Iterator<Item=Loc<ElmToken>>> StreamParser<I> {
     fn parse_imports(&mut self) -> Result<(),ParserError> {
         self.stage = ParserStage::TopDeclrs;
         while let Some(&(_, ElmToken::Import)) = self.input.peek() {
-            let cur_import = parse_Import(lalrpopify!(self.input, filter_nl))?;
+            let cur_import = ImportParser::new().parse(lalrpopify!(self.input, filter_nl))?;
             // TODO: gracefully handle individually broken bits of code.
             self.module_imports.push(cur_import);
         }
@@ -189,7 +189,7 @@ impl<I: Iterator<Item=Loc<ElmToken>>> StreamParser<I> {
                 break Ok(())
             };
             let next_toplevel_lex = lalrpopify!(self.input, filter_indent);
-            match parse_TopDeclr(next_toplevel_lex) {
+            match TopDeclrParser::new().parse(next_toplevel_lex) {
                 Ok(val)        => self.top_levels.push(val),
                 Err(lrp_error) => break Err(lrp_error.into()),
             };

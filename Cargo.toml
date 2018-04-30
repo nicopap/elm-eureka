@@ -11,11 +11,11 @@ categories = ["parser-implementations", "text-processing"]
 license = "LGPL3"
 
 [build-dependencies]
-lalrpop = "0.14.0"
+lalrpop = "0.15.1"
 
 [dependencies]
 serde_json = "1.0"
-lalrpop-util = "0.14.0"
+lalrpop-util = "0.15.1"
 itertools = "0.7.6"
 walkdir = "2"
 quick-error = "1.2.1"
