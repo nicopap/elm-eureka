@@ -77,9 +77,9 @@ enum ParserStage {
 /// of the file.
 struct StreamParser<I: Iterator<Item=Loc<ElmToken>>> {
     input : OMG<I>,
-    module_declr: Option<tree::ModuleDeclr>,
+    module_declr: Option<tree::ModuleDeclr<String,Location>>,
     module_doc: Option<String>,
-    module_imports: Vec<tree::Import>,
+    module_imports: Vec<tree::Import<String,Location>>,
     top_levels: Vec<tree::TopDeclr<String,Location>>,
     stage: ParserStage,
 }
@@ -303,7 +303,7 @@ impl<I> Parser<I>
     /// let declaration = parser.module_declaration().unwrap();
     /// assert_eq!(declaration.name, "My.Great.Module".to_owned());
     /// ```
-    pub fn module_declaration(&mut self) -> Option<&tree::ModuleDeclr> {
+    pub fn module_declaration(&mut self) -> Option<&tree::ModuleDeclr<String,Location>> {
         self.0.evaluate_up_to(ParserStage::ModuleDoc).unwrap();
         self.0.module_declr.as_ref()
     }
@@ -336,7 +336,7 @@ impl<I> Parser<I>
     }
 
     /// Returns the list of import declarations. Evaluating it if needed
-    pub fn imports(&mut self) -> &[tree::Import] {
+    pub fn imports(&mut self) -> &[tree::Import<String,Location>] {
         self.0.evaluate_up_to(ParserStage::TopDeclrs).unwrap();
         &self.0.module_imports
     }

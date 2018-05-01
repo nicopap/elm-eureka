@@ -7,54 +7,52 @@
 //! I intend to only export the types that enter into
 //! the construction of the global parse tree (`Module`)
 #![allow(non_camel_case_types)]
+use tokens;
 
 pub type Anchored<object,attribute> = (attribute, object);
 
-pub type Name = String;
-pub type Operator = String;
-
 #[derive(Debug,Clone)]
-pub enum ExportList {
+pub enum ExportList<name,annot> {
     Unqualified,
-    List(Vec<ExportEntry>),
+    List(Vec<ExportEntry<name,annot>>),
+}
+
+pub type ExportEntry<name,annot> = Anchored<ExportEntry_<name>,annot>;
+
+#[derive(Debug,Clone)]
+pub enum ExportEntry_<name> {
+    Name(name),
+    Operator(name),
+    WithConstructors(name, Vec<name>),
+    WithAllConstructors(name),
 }
 
 #[derive(Debug,Clone)]
-pub enum ExportEntry {
-    Name(Name),
-    Operator(Operator),
-    WithConstructors(Name, Vec<Name>),
-    WithAllConstructors(Name),
+pub struct ModuleDeclr<name,annot> {
+    pub name: name,
+    pub exports: ExportList<name,annot>,
 }
 
 #[derive(Debug,Clone)]
-pub struct ModuleDeclr {
-    pub name: Name,
-    pub exports: ExportList,
+pub struct Import<name,annot> {
+    pub global_name: name,
+    pub local_name: Option<name>,
+    pub exposes: Option<ExportList<name,annot>>,
 }
 
-#[derive(Debug,Clone)]
-pub struct Import {
-    pub global_name: Name,
-    pub local_name: Option<Name>,
-    pub exposes: Option<ExportList>,
-}
-
-// TODO: use explicit records with fields instead of tuples
 #[derive(Debug,Clone)]
 pub enum TopDeclr<name,annot> {
-    OperPriority(OperPriority),
+    OperPriority(OperPriority<name>),
     DocComment(String),
-    TypeDeclr(TypeDeclr),
-    TypeAlias(TypeAlias),
-    FunctionAnnotation(bool, name, Type),
-    OperatorAnnotation(name, Type),
-    FunctionDeclr(name, Vec<Pattern>, Expression<name,annot>),
-    OperatorDeclr(name, Vec<Pattern>, Expression<name,annot>),
+    Type(TypeGenre<name>),
+    FunctionAnnotation(bool, name, Type<name>),
+    OperatorAnnotation(name, Type<name>),
+    FunctionDeclr(name, Vec<Pattern<name,annot>>, Expression<name,annot>),
+    OperatorDeclr(name, Vec<Pattern<name,annot>>, Expression<name,annot>),
     OperatorPrioDeclr {
         function: name,
         name: name,
-        priority: OperPriority,
+        priority: OperPriority<name>,
     },
 }
 
@@ -66,114 +64,102 @@ pub enum FunctionKind {
 
 #[derive(Debug,Clone)]
 pub struct Function<name,annot> {
-    pub annotation: Option<Type>,
+    pub annotation: Option<Type<name>>,
     pub doc: Option<String>,
     pub name: name,
     pub kind: FunctionKind,
-    pub arguments: Vec<Pattern>,
+    pub arguments: Vec<Pattern<name,annot>>,
     pub body: Expression<name,annot>,
 }
 
 #[derive(Debug,Clone)]
 pub struct Port<name> {
-    pub annotation: Type,
+    pub annotation: Type<name>,
     pub doc: Option<String>,
     pub name: name,
 }
 
+pub type Type<name> = Anchored<Type_<name>,tokens::Location>;
 #[derive(Debug,Clone)]
-pub struct TypeAlias {
-    pub name: Name,
-    pub type_variables: Vec<Name>,
-    pub type_ : Type,
+pub enum Type_<name> {
+    /// Terminal is the name of a type.
+    Terminal(name),
+    /// A type variable, it is a lowercase type.
+    Variable(name),
+    Tuple(Vec<Type<name>>),
+    /// A record, can have typed fields, can be an anonymous extensible
+    /// record `{ a | fields : Blah }`
+    Record {
+        variable_over: Option<name>,
+        fields: Vec<(name, Type<name>)>,
+    },
+    /// A function with arity 1 or more (in fact, with curry everything is of
+    /// arity 1 or 0, but who cares (hint: not me))
+    Function(Vec<Type<name>>),
+    /// A type application, such as `Task (List String) (a, b -> c)`
+    /// (when the kind of a type is 1 or more, it needs an "argument"
+    /// to become an actual meaningfull type)
+    Application(name, Vec<Type<name>>),
+    /// The empty record `{}`
+    EmptyRecord,
+    UnitType,
 }
 
+pub type TypeGenre<name> = Anchored<TypeGenre_<name>,tokens::Location>;
 #[derive(Debug,Clone)]
-pub struct TypeDeclr {
-    pub name: Name,
-    /// Generic type variables arguments to types
-    /// `Either a b`
-    pub type_variables: Vec<Name>,
-    /// List of alternatives
-    pub alternatives: Vec<(Name, Vec<Type>)>,
-}
-
-#[derive(Debug,Clone)]
-pub enum TypeGenre {
-    Alias(Type),
-    Full(Vec<(Name,Vec<Type>)>),
-}
-
-#[derive(Debug,Clone)]
-pub struct TypeDeclaration {
-    pub name: Name,
-    pub type_variables: Vec<Name>,
-    pub genre: TypeGenre,
-    pub doc: Option<String>,
+pub enum TypeGenre_<name> {
+    Alias {
+        name: name,
+        type_variables: Vec<name>,
+        type_ : Type<name>,
+    },
+    Full {
+        name: name,
+        /// Generic type variables arguments to types
+        /// `Either a b`
+        type_variables: Vec<name>,
+        /// List of alternatives
+        alternatives: Vec<Anchored<(name, Vec<Type<name>>),tokens::Location>>,
+    },
 }
 
 #[derive(Debug,Clone)]
 pub enum Associativity { Left, Right, Non }
 
 #[derive(Debug,Clone)]
-pub struct OperPriority {
+pub struct OperPriority<name> {
     pub associativity: Associativity,
     pub precedence: u8,
-    pub operator: Operator,
+    pub operator: name,
+    pub location: tokens::Location,
 }
 
+
+pub type Pattern<name,annot> = Anchored<Pattern_<name,annot>,annot>;
+
 #[derive(Debug,Clone)]
-pub enum Type {
-    /// Terminal is the name of a type.
-    Terminal(Name),
-    /// A type variable, it is a lowercase type.
-    Variable(Name),
-    Tuple(Vec<Type>),
-    /// A record, can have typed fields, can be an anonymous extensible
-    /// record `{ a | fields : Blah }`
-    Record(Record),
-    /// A function with arity 1 or more (in fact, with curry everything is of
-    /// arity 1 or 0, but who cares (hint: not me))
-    Function(Vec<Type>),
-    /// A type application, such as `Task (List String) (a, b -> c)`
-    /// (when the kind of a type is 1 or more, it needs an "argument"
-    /// to become an actual meaningfull type)
-    Application(Name, Vec<Type>),
-    /// The empty record `{}`
-    EmptyRecord,
-    /// Honestly my favorite thing about fancy type systems
+pub enum Pattern_<name,annot> {
+    ArgConstructor(name, Vec<Pattern<name,annot>>),
+    Record(Vec<name>),
+    AliasBind(name, Box<Pattern<name,annot>>),
+    Tuple(Vec<Pattern<name,annot>>),
     UnitType,
-}
-
-#[derive(Debug,Clone)]
-pub struct Record {
-    pub variable_over : Option<Name>,
-    pub fields : Vec<(Name, Type)>,
-}
-
-#[derive(Debug,Clone)]
-pub enum Pattern {
-    ArgConstructor(Name, Vec<Pattern>),
-    Record(Vec<Name>),
-    AliasBind(Name, Box<Pattern>),
-    Tuple(Vec<Pattern>),
-    UnitType,
-    Constructor(Name),
-    Bind(Name),
+    Constructor(name),
+    Bind(name),
     StringLit(String),
     Character(String),
     Number(String),
     Discard,
     EmptyList,
-    List(Vec<Pattern>),
-    Decons(Vec<Pattern>),
+    List(Vec<Pattern<name,annot>>),
+    Decons(Vec<Pattern<name,annot>>),
 }
 
 #[derive(Debug,Clone)]
 pub enum Literal {
-	Char,
-	StringL,
-	Number,
+    Char,
+    StringL,
+    Number,
 }
 
 pub type Expression<name,annot> = Anchored<Expression_<name,annot>,annot>;
@@ -199,10 +185,10 @@ pub enum Expression_<name,annot> {
     /// case `condition` of (`branches`)
     CaseOf {
         condition: Box<Expression<name,annot>>,
-        branches: Vec<(Pattern, Expression<name,annot>)>,
+        branches: Vec<(Pattern<name,annot>, Expression<name,annot>)>,
     },
     Lambda {
-        arguments: Vec<Pattern>,
+        arguments: Vec<Pattern<name,annot>>,
         body: Box<Expression<name,annot>>,
     },
     /// [(`Expression<name,annot>` `op`) (`Expression<name,annot>` `op`) ... `op`)] `trailing`
@@ -222,29 +208,29 @@ pub enum Expression_<name,annot> {
 
 #[derive(Debug,Clone)]
 pub struct LetDeclaration<name,annot> {
-    pub annotation: Option<Type>,
+    pub annotation: Option<Type<name>>,
     pub name: Option<name>,
-    pub arguments: Vec<Pattern>,
+    pub arguments: Vec<Pattern<name,annot>>,
     pub body: Expression<name,annot>,
 }
 
 #[derive(Debug,Clone)]
 pub struct Module<name,annot> {
     pub name: Option<name>,
-    pub exports: ExportList,
+    pub exports: ExportList<name,annot>,
     pub doc: Option<String>,
-    pub imports: Vec<Import>,
-    pub types: Vec<TypeDeclaration>,
+    pub imports: Vec<Import<name,annot>>,
+    pub types: Vec<(Option<String>, TypeGenre<name>)>,
     pub functions: Vec<Function<name,annot>>,
-    pub infixities: Vec<OperPriority>,
+    pub infixities: Vec<OperPriority<name>>,
     pub ports: Option<Vec<Port<name>>>,
 }
 
 pub struct CoalecedTopDeclr<name,annot> {
     pub ports: Vec<Port<name>>,
-    pub infixities: Vec<OperPriority>,
+    pub infixities: Vec<OperPriority<name>>,
     pub functions: Vec<Function<name,annot>>,
-    pub types: Vec<TypeDeclaration>,
+    pub types: Vec<(Option<String>, TypeGenre<name>)>,
 }
 
 pub fn into_tree<I,name,annot>(declrs : I) -> CoalecedTopDeclr<name,annot>
@@ -257,7 +243,7 @@ pub fn into_tree<I,name,annot>(declrs : I) -> CoalecedTopDeclr<name,annot>
     let mut functions = Vec::new();
     let mut types = Vec::new();
     let mut last_doc : Option<String> = None;
-    let mut last_annotation : Option<Type> = None;
+    let mut last_annotation : Option<Type<name>> = None;
     for top_declr in declrs { match top_declr {
         TD::OperPriority(oper_priority) => {
             infixities.push(oper_priority);
@@ -265,19 +251,9 @@ pub fn into_tree<I,name,annot>(declrs : I) -> CoalecedTopDeclr<name,annot>
         TD::DocComment(content) => {
             last_doc = Some(content);
         },
-        TD::TypeDeclr(TypeDeclr{name,type_variables,alternatives}) =>{
+        TD::Type(genre) =>{
             let doc = last_doc.take();
-            let genre = TypeGenre::Full(alternatives);
-            types.push(TypeDeclaration {
-                name, type_variables, genre, doc
-            })
-        },
-        TD::TypeAlias(TypeAlias{name, type_, type_variables}) => {
-            let doc = last_doc.take();
-            let genre = TypeGenre::Alias(type_);
-            types.push(TypeDeclaration {
-                name, type_variables, genre, doc
-            })
+            types.push((doc,genre))
         },
         TD::FunctionAnnotation(true, name, annotation) => {
             let doc = last_doc.take();

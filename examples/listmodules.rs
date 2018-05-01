@@ -1,6 +1,6 @@
 //! Displays module doc and exported symbols of
 //! all elm source files in an elm project
-#![feature(io)]
+#![feature(io,use_nested_groups)]
 
 extern crate elm_eureka;
 
@@ -13,18 +13,17 @@ use std::fs::File;
 use std::ops::IndexMut;
 use std::error::Error;
 
-use elm_eureka::Parser;
-use elm_eureka::packages_reader;
-use elm_eureka::parser::tree;
+use elm_eureka::{Parser,packages_reader,parser::tree};
 
 const NTHREAD:usize=4;
 
+type Location=((u32,u16),(u32,u16));
 struct ModuleMessage {
     module_name: String,
     name: Option<String>,
     doc: Option<String>,
-    exports: tree::ExportList,
-    imports: Vec<tree::Import>,
+    exports: tree::ExportList<String,Location>,
+    imports: Vec<tree::Import<String,Location>>,
 }
 
 fn parse_and_feedback(

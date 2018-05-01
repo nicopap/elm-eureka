@@ -6,17 +6,19 @@ use super::tree;
 use self::tree::{
     TopDeclr,
     Expression,
-    Expression_,
+    Expression_ as Expr,
     Import,
     ExportEntry,
+    ExportEntry_,
     ExportList,
     ModuleDeclr,
     OperPriority,
     LetDeclaration,
     Pattern,
+    Pattern_ as Pat,
     Type,
-    TypeAlias,
-    TypeDeclr,
+    Type_,
+    TypeGenre_,
     Associativity,
     Anchored,
     Literal,
@@ -28,7 +30,7 @@ Spanned<Rule>: Anchored<Rule, tokens::Location> = {
     <l: @L> <rule: Rule> <r: @R> => ((l,r),rule),
 };
 
-pub ModuleDeclr: Option<ModuleDeclr> = {
+pub ModuleDeclr: Option<ModuleDeclr<String,tokens::Location>> = {
     NameTok "module" <name:NameTok>
     "where" "{" NameTok "=" NameTok ("," NameTok "=" NameTok)* "}"
     "exposing" <exports:ExportList> =>
@@ -43,20 +45,21 @@ pub ModuleDeclr: Option<ModuleDeclr> = {
         None,
 };
 
-ExportList: ExportList = {
+ExportList: ExportList<String,tokens::Location> = {
     "(" ".." ")" => ExportList::Unqualified,
     "(" <Comma<ExportEntry>> ")" => ExportList::List(<>),
 };
 
-ExportEntry: ExportEntry = {
-    NameTok => ExportEntry::Name(<>),
-    "(" <OperatorTok> ")" => ExportEntry::Operator(<>),
-    <NameTok> "(" ".." ")" => ExportEntry::WithAllConstructors(<>),
-    <NameTok> "(" <Comma<NameTok>> ")" => ExportEntry::WithConstructors(<>),
+ExportEntry: ExportEntry<String,tokens::Location> = Spanned<RawExportEntry>;
+RawExportEntry: ExportEntry_<String> = {
+    NameTok => ExportEntry_::Name(<>),
+    "(" <OperatorTok> ")" => ExportEntry_::Operator(<>),
+    <NameTok> "(" ".." ")" => ExportEntry_::WithAllConstructors(<>),
+    <NameTok> "(" <Comma<NameTok>> ")" => ExportEntry_::WithConstructors(<>),
 
 };
 
-pub Import: Import = {
+pub Import: Import<String,tokens::Location> = {
     "import" <global_name:NameTok>
     <local_name:("as" <NameTok>)?>
     <exposes:("exposing" <ExportList>)?> => Import{ <> },
@@ -64,16 +67,17 @@ pub Import: Import = {
 
 
 pub TopDeclr: TopDeclr<String,tokens::Location> = {
-    "infixr" <precedence:NumberTok> <operator:OperatorTok> =>
+    <l:@L> "infixr" <precedence:NumberTok> <operator:OperatorTok> <r:@R> =>
         TopDeclr::OperPriority(OperPriority {
             associativity: Associativity::Right,
             precedence:
                 u8::from_str(precedence.as_str())
                     .expect("Error reading precedence of infix operator"),
-            operator : operator,
+            operator: operator,
+            location: (l,r),
         }),
 
-    "infixl" <precedence:NumberTok> <operator:OperatorTok> =>
+    <l:@L> "infixl" <precedence:NumberTok> <operator:OperatorTok> <r:@R> =>
         TopDeclr::OperPriority(OperPriority {
             associativity: Associativity::Left,
             precedence:
@@ -84,9 +88,10 @@ pub TopDeclr: TopDeclr<String,tokens::Location> = {
                 u8::from_str(precedence.as_str())
                     .expect("Error reading precedence of infix operator"),
             operator : operator,
+            location: (l,r),
         }),
 
-    "infix" <precedence:NumberTok> <operator:OperatorTok> =>
+    <l:@L> "infix" <precedence:NumberTok> <operator:OperatorTok> <r:@R> =>
         TopDeclr::OperPriority(OperPriority {
             associativity: Associativity::Non,
             precedence:
@@ -97,10 +102,12 @@ pub TopDeclr: TopDeclr<String,tokens::Location> = {
                 u8::from_str(precedence.as_str())
                     .expect("Error reading precedence of infix operator"),
             operator : operator,
+            location: (l,r),
         }),
 
-    "infix" <kind:NameTok> <precedence:NumberTok> "(" <name:OperatorTok> ")"
-    "=" <function:NameTok> => {
+    <l:@L> "infix" <kind:NameTok> <precedence:NumberTok>
+    "(" <name:OperatorTok> ")"
+    "=" <function:NameTok> <r:@R> => {
         let associativity = match kind.as_ref() {
             "left" => Associativity::Left,
             "right" => Associativity::Right,
@@ -116,20 +123,28 @@ pub TopDeclr: TopDeclr<String,tokens::Location> = {
                 // better error handling system).
                 u8::from_str(precedence.as_str())
                     .expect("Error reading precedence of infix operator"),
+            location: (l,r),
         };
         TopDeclr::OperatorPrioDeclr { priority, function, name }
     },
 
-    "type" <name:NameTok> <type_variables:NameTok*> "="
-    <first_alt:(<NameTok> <EnclosedType*>)>
-    <next_alts:("|"<NameTok> <EnclosedType*>)*> => {
-        let mut alternatives : Vec<(String, Vec<Type>)> = next_alts;
+    "type" <l:@L> <name:NameTok> <type_variables:NameTok*> "="
+    <first_alt:Spanned<(<NameTok> <EnclosedType*>)>>
+    <next_alts:("|"<Spanned<(<NameTok> <EnclosedType*>)>>)*> <r:@R> => {
+        let mut alternatives = next_alts;
         alternatives.insert(0,first_alt);
-        TopDeclr::TypeDeclr(TypeDeclr{name,type_variables,alternatives})
+        TopDeclr::Type((
+            (l,r),
+            TypeGenre_::Full { name, type_variables, alternatives },
+        ))
     },
 
-    "type" "alias" <name:NameTok> <type_variables:NameTok*> "=" <type_:Type> =>
-        TopDeclr::TypeAlias(TypeAlias{name, type_variables, type_}),
+    "type" "alias" <l:@L> <name:NameTok> <type_variables:NameTok*>
+    "=" <type_:Type> <r:@R> =>
+        TopDeclr::Type((
+            (l,r),
+            TypeGenre_::Alias { name, type_variables, type_ }
+        )),
 
     "(" <OperatorTok> ")" <EnclosedPattern*> "=" <Expression> =>
         TopDeclr::OperatorDeclr(<>),
@@ -146,134 +161,140 @@ pub TopDeclr: TopDeclr<String,tokens::Location> = {
     <DocCommentTok> => TopDeclr::DocComment(<>),
 };
 
-Type: Type = {
+Type: Type<String> = Spanned<RawType>;
+RawType: Type_<String> = {
     <args:(<FunctionlessType> "->")+> <returns:FunctionlessType> => {
         let mut function_types = args;
         function_types.push(returns);
-        Type::Function(function_types)
+        Type_::Function(function_types)
     },
 
-    FunctionlessType => <>,
+    RawFunctionlessType,
 };
 
-FunctionlessType: Type = {
-    NameTok EnclosedType+ => Type::Application(<>),
-    EnclosedType => <>,
+FunctionlessType: Type<String> = Spanned<RawFunctionlessType>;
+RawFunctionlessType: Type_<String> = {
+    NameTok EnclosedType+ => Type_::Application(<>),
+    RawEnclosedType,
 };
 
-EnclosedType: Type = {
+EnclosedType: Type<String> = Spanned<RawEnclosedType>;
+RawEnclosedType: Type_<String> = {
     <name:NameTok> =>
         if name.chars().nth(0).map(|x| x.is_lowercase()) == Some(true) {
-            Type::Variable(name)
+            Type_::Variable(name)
         } else {
-            Type::Terminal(name)
+            Type_::Terminal(name)
         },
 
     "(" <entries:(<Type> ",")+> <last:Type> ")" => {
         let mut entries = entries;
         entries.push(last);
-        Type::Tuple(entries)
+        Type_::Tuple(entries)
     },
 
     "{" <variable_over:(<NameTok> "|")?>
     <fields:Comma<(<NameTok> ":" <Type>)>> "}" => {
-        Type::Record(tree::Record { variable_over, fields })
+        Type_::Record { variable_over, fields }
     },
 
-    "{" "}" => Type::EmptyRecord,
-    "(" ")" => Type::UnitType,
-    "(" <Type> ")" => <>,
+    "{" "}" => Type_::EmptyRecord,
+    "(" ")" => Type_::UnitType,
+    "(" <RawType> ")",
 };
 
-Pattern: Pattern = {
+Pattern: Pattern<String,tokens::Location> = Spanned<RawPattern>;
+RawPattern: Pat<String,tokens::Location> = {
     <entries:(<AppliPattern> OperatorTok)+> <last:AppliPattern> => {
         let mut entries = entries;
         entries.push(last);
-        Pattern::Decons(entries)
+        Pat::Decons(entries)
     },
 
-    AppliPattern => <>,
+    RawAppliPattern,
 };
 
-AppliPattern: Pattern = {
+AppliPattern: Pattern<String,tokens::Location> = Spanned<RawAppliPattern>;
+RawAppliPattern: Pat<String,tokens::Location> = {
     <name:NameTok> <arguments:EnclosedPattern+> => {
         if name.chars().nth(0).map(|x| x.is_uppercase()) == Some(true) {
-            Pattern::ArgConstructor(name, arguments)
+            Pat::ArgConstructor(name, arguments)
         } else {
             panic!("A bind located at the place of constructor")
         }
     },
 
-    EnclosedPattern => <>,
+    RawEnclosedPattern,
 };
 
-EnclosedPattern: Pattern = {
+EnclosedPattern: Pattern<String,tokens::Location> = Spanned<RawEnclosedPattern>;
+RawEnclosedPattern: Pat<String,tokens::Location> = {
     "{" <Comma<NameTok>> "}" => // TODO: bind only to lowercase
-        Pattern::Record(<>),
+        Pat::Record(<>),
 
     "(" <p:Pattern> "as" <name:NameTok> ")" =>
-        Pattern::AliasBind(name, Box::new(p)),
+        Pat::AliasBind(name, Box::new(p)),
 
     "(" <entries:(<Pattern> ",")+> <last:Pattern> ")" => {
         let mut entries = entries;
         entries.push(last);
-        Pattern::Tuple(entries)
+        Pat::Tuple(entries)
     },
 
     <name:NameTok> =>
         if name.chars().nth(0).map(|x| x.is_lowercase()) == Some(true) {
-            Pattern::Bind(name)
+            Pat::Bind(name)
         } else {
-            Pattern::Constructor(name)
+            Pat::Constructor(name)
         },
 
-    "(" <Pattern> ")" => <>,
-    "(" ")" => Pattern::UnitType,
-    StringTok => Pattern::StringLit(<>),
-    NumberTok => Pattern::Number(<>),
-    CharTok => Pattern::Character(<>),
-    "_" => Pattern::Discard,
-    "[" "]" => Pattern::EmptyList,
-    "[" <Comma<Pattern>> "]" => Pattern::List(<>),
+    "(" <RawPattern> ")",
+    "(" ")" => Pat::UnitType,
+    StringTok => Pat::StringLit(<>),
+    NumberTok => Pat::Number(<>),
+    CharTok => Pat::Character(<>),
+    "_" => Pat::Discard,
+    "[" "]" => Pat::EmptyList,
+    "[" <Comma<Pattern>> "]" => Pat::List(<>),
 
 };
 
 Expression: Expression<String,tokens::Location> = Spanned<RawExpression>;
-RawExpression: Expression_<String,tokens::Location> = {
+RawExpression: Expr<String,tokens::Location> = {
     <prefixes:(<ApplicationExpression> <OperatorTok>)+>
     <trailing:OpenExpression> =>
-        Expression_::InfixApplication{prefixes, trailing:Box::new(trailing)},
+        Expr::InfixApplication{prefixes, trailing:Box::new(trailing)},
 
-    RawOpenExpression => <>,
+    RawOpenExpression,
 };
 
 CaseExpression: Expression<String,tokens::Location> = Spanned<RawCaseExpression>;
-RawCaseExpression: Expression_<String,tokens::Location> = {
+RawCaseExpression: Expr<String,tokens::Location> = {
     <prefixes:(<ApplicationExpression> <OperatorTok>)+>
     <trailing:CaseOpenExpression> =>
-        Expression_::InfixApplication{prefixes, trailing:Box::new(trailing)},
+        Expr::InfixApplication{prefixes, trailing:Box::new(trailing)},
 
-    RawCaseOpenExpression => <>,
+    RawCaseOpenExpression,
 };
 
 CaseOpenExpression: Expression<String,tokens::Location> = Spanned<RawCaseOpenExpression>;
-RawCaseOpenExpression: Expression_<String,tokens::Location> = {
+RawCaseOpenExpression: Expr<String,tokens::Location> = {
     "case" <condition:Expression> "of"
     <init:(<Pattern> "->" <CaseExpression> "case indent")*>
     <last:(<Pattern> "->" <CaseExpression>)> "endcase" => {
         let mut branches = init;
         branches.push(last);
-        Expression_::CaseOf{condition:Box::new(condition), branches}
+        Expr::CaseOf{condition:Box::new(condition), branches}
     },
 
     "lambda" <arguments:EnclosedPattern+> "->"
     <body:CaseExpression>  =>
-        Expression_::Lambda{arguments, body:Box::new(body)},
+        Expr::Lambda{arguments, body:Box::new(body)},
 
     "if" <ife:Expression>
     "then" <thene:Expression>
     "else" <elsee:CaseExpression> =>
-        Expression_::IfThenElse {
+        Expr::IfThenElse {
             condition: Box::new(ife),
             then_branch: Box::new(thene),
             else_branch: Box::new(elsee)
@@ -283,33 +304,33 @@ RawCaseOpenExpression: Expression_<String,tokens::Location> = {
     "in" <in_expr:CaseExpression> => {
         let mut declarations = init;
         declarations.push(last);
-        Expression_::LetIn {
+        Expr::LetIn {
             declarations,
             expression: Box::new(in_expr)
         }
     },
 
-    RawApplicationExpression => <>,
+    RawApplicationExpression,
 };
 
 OpenExpression: Expression<String,tokens::Location> = Spanned<RawOpenExpression>;
-RawOpenExpression: Expression_<String,tokens::Location> = {
+RawOpenExpression: Expr<String,tokens::Location> = {
     "case" <condition:Expression> "of"
     <init:(<Pattern> "->" <CaseExpression> "case indent")*>
     <last:(<Pattern> "->" <CaseExpression>)> => {
         let mut branches = init;
         branches.push(last);
-        Expression_::CaseOf{condition:Box::new(condition), branches}
+        Expr::CaseOf{condition:Box::new(condition), branches}
     },
 
     "lambda" <arguments:EnclosedPattern+> "->"
     <body:Expression>  =>
-        Expression_::Lambda{arguments, body:Box::new(body)},
+        Expr::Lambda{arguments, body:Box::new(body)},
 
     "if" <ife:Expression>
     "then" <thene:Expression>
     "else" <elsee:Expression> =>
-        Expression_::IfThenElse {
+        Expr::IfThenElse {
             condition: Box::new(ife),
             then_branch: Box::new(thene),
             else_branch: Box::new(elsee)
@@ -319,56 +340,56 @@ RawOpenExpression: Expression_<String,tokens::Location> = {
     "in" <in_expr:Expression> => {
         let mut declarations = init;
         declarations.push(last);
-        Expression_::LetIn {
+        Expr::LetIn {
             declarations,
             expression: Box::new(in_expr)
         }
     },
 
-    RawApplicationExpression => <>,
+    RawApplicationExpression,
 };
 
 ApplicationExpression: Expression<String,tokens::Location> = Spanned<RawApplicationExpression>;
-RawApplicationExpression: Expression_<String,tokens::Location> = {
+RawApplicationExpression: Expr<String,tokens::Location> = {
     <head:ClosedExpression> <tail:ClosedExpression+> => {
         let mut expressions = tail;
         expressions.insert(0,head);
-        Expression_::Application(expressions)
+        Expr::Application(expressions)
     },
 
-    RawClosedExpression => <>,
+    RawClosedExpression,
 };
 
 ClosedExpression: Expression<String,tokens::Location> = Spanned<RawClosedExpression>;
-RawClosedExpression: Expression_<String,tokens::Location> = {
+RawClosedExpression: Expr<String,tokens::Location> = {
     "{" <updates:(<NameTok> "|")?>
     <fields:Comma<(<NameTok> "=" <Expression>)>> "}" =>
-        Expression_::Record{<>},
+        Expr::Record{<>},
 
     "[" <Comma<Expression>> "]" =>
-        Expression_::List(<>),
+        Expr::List(<>),
 
     "(" <entries:(<Expression> ",")+> <last:Expression> ")" => {
         let mut entries = entries;
         entries.push(last);
-        Expression_::Tuple(entries)
+        Expr::Tuple(entries)
     },
 
     "(" <commas:","+> ")" =>
-        Expression_::TupleConstructor((commas.len() + 1) as i16),
+        Expr::TupleConstructor((commas.len() + 1) as i16),
 
-    "{" "}" => Expression_::Record {
+    "{" "}" => Expr::Record {
         updates: None,
         fields: Vec::new(),
     },
-    "[" "]" => Expression_::List(Vec::new()),
-    "(" ")" => Expression_::Tuple(Vec::new()),
-    "(" <RawExpression> ")" => <>,
-    StringTok => Expression_::Literal(Literal::StringL, <>),
-    NumberTok => Expression_::Literal(Literal::Number,<>),
-    CharTok => Expression_::Literal(Literal::Char,<>),
-    "(" <OperatorTok> ")" => Expression_::PrefixOperator(<>),
-    NameTok => Expression_::Variable(<>),
+    "[" "]" => Expr::List(Vec::new()),
+    "(" ")" => Expr::Tuple(Vec::new()),
+    "(" <RawExpression> ")",
+    StringTok => Expr::Literal(Literal::StringL, <>),
+    NumberTok => Expr::Literal(Literal::Number,<>),
+    CharTok => Expr::Literal(Literal::Char,<>),
+    "(" <OperatorTok> ")" => Expr::PrefixOperator(<>),
+    NameTok => Expr::Variable(<>),
 };
 
 LetDeclaration: LetDeclaration<String,tokens::Location> = {
