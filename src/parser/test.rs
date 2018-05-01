@@ -3,8 +3,7 @@
 use test::{Bencher,black_box};
 
 use super::Parser;
-use super::tree::Expression_ as Expr;
-use super::tree::Module;
+use super::tree::{Expression_ as Expr, Module, Literal};
 
 
 // Should succesfully compile the compilation of examples available in
@@ -45,7 +44,7 @@ use super::tree::Module;
     assert_eq!(&only_function.name, "main");
 
     if let (_,Expr::Application(mut only_function_app)) = only_function.body {
-        if let Some((_,Expr::StringLit(hello_str))) = only_function_app.pop() {
+        if let Some((_,Expr::Literal(Literal::StringL, hello_str))) = only_function_app.pop() {
             if let Some((_,Expr::Variable(fn_name))) = only_function_app.pop() {
                 assert_eq!((fn_name.as_ref(),hello_str.as_ref()), ("text", "Hello, World!"))
             } else {

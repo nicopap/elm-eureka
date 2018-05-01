@@ -19,6 +19,7 @@ use self::tree::{
     TypeDeclr,
     Associativity,
     Anchored,
+    Literal,
 };
 
 grammar;
@@ -356,13 +357,16 @@ RawClosedExpression: Expression_<String,tokens::Location> = {
     "(" <commas:","+> ")" =>
         Expression_::TupleConstructor((commas.len() + 1) as i16),
 
-    "{" "}" => Expression_::EmptyRecord,
-    "[" "]" => Expression_::EmptyList,
-    "(" ")" => Expression_::UnitType,
+    "{" "}" => Expression_::Record {
+        updates: None,
+        fields: Vec::new(),
+    },
+    "[" "]" => Expression_::List(Vec::new()),
+    "(" ")" => Expression_::Tuple(Vec::new()),
     "(" <RawExpression> ")" => <>,
-    StringTok => Expression_::StringLit(<>),
-    NumberTok => Expression_::Number(<>),
-    CharTok => Expression_::Character(<>),
+    StringTok => Expression_::Literal(Literal::StringL, <>),
+    NumberTok => Expression_::Literal(Literal::Number,<>),
+    CharTok => Expression_::Literal(Literal::Char,<>),
     "(" <OperatorTok> ")" => Expression_::PrefixOperator(<>),
     NameTok => Expression_::Variable(<>),
 };

@@ -169,6 +169,13 @@ pub enum Pattern {
     Decons(Vec<Pattern>),
 }
 
+#[derive(Debug,Clone)]
+pub enum Literal {
+	Char,
+	StringL,
+	Number,
+}
+
 pub type Expression<name,annot> = Anchored<Expression_<name,annot>,annot>;
 
 #[derive(Debug,Clone)]
@@ -179,12 +186,7 @@ pub enum Expression_<name,annot> {
     },
     List(Vec<Expression<name,annot>>),
     Tuple(Vec<Expression<name,annot>>),
-    StringLit(String),
-    Character(String),
-    Number(String),
-    UnitType,
-    EmptyRecord,
-    EmptyList,
+    Literal(Literal, String),
     IfThenElse {
         condition: Box<Expression<name,annot>>,
         then_branch: Box<Expression<name,annot>>,
