@@ -24,7 +24,7 @@ struct ModuleMessage {
     name: Option<String>,
     doc: Option<String>,
     exports: tree::ExportList,
-    imports: Vec<tree::ElmImport>,
+    imports: Vec<tree::Import>,
 }
 
 fn parse_and_feedback(
@@ -35,7 +35,7 @@ fn parse_and_feedback(
         let file = File::open(source_path).unwrap();
         let char_stream = BufReader::new(file).chars().map(|x| x.unwrap());
         let mut parser = Parser::new(char_stream);
-        let tree::ElmModule{exports,imports,name,doc,..} = parser.into_parse_tree();
+        let tree::Module{exports,imports,name,doc,..} = parser.into_parse_tree();
         match send.send(
             Some(ModuleMessage{module_name, name,doc,exports,imports})
         ) {

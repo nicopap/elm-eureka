@@ -5,9 +5,11 @@
 //!
 //! This is not intended for use by external crate.
 //! I intend to only export the types that enter into
-//! the construction of the global parse tree (`ElmModule`)
+//! the construction of the global parse tree (`Module`)
+#![allow(non_camel_case_types)]
 
-pub type Location = (u32, u16);
+pub type Anchored<object,attribute> = (attribute, object);
+
 pub type Name = String;
 pub type Operator = String;
 
@@ -32,28 +34,26 @@ pub struct ModuleDeclr {
 }
 
 #[derive(Debug,Clone)]
-pub struct ElmImport {
+pub struct Import {
     pub global_name: Name,
     pub local_name: Option<Name>,
     pub exposes: Option<ExportList>,
-    pub location: Location,
 }
 
 // TODO: use explicit records with fields instead of tuples
 #[derive(Debug,Clone)]
-pub enum TopDeclr {
+pub enum TopDeclr<name,annot> {
     OperPriority(OperPriority),
     DocComment(String),
-    TypeDeclr(Location, TypeDeclr),
-    TypeAlias(Location, TypeAlias),
-    FunctionAnnotation(Location, bool, Name, Type),
-    OperatorAnnotation(Name, Type),
-    FunctionDeclr(Location, Name, Vec<Pattern>, Expression),
-    OperatorDeclr(Location, Name, Vec<Pattern>, Expression),
+    TypeDeclr(TypeDeclr),
+    TypeAlias(TypeAlias),
+    FunctionAnnotation(bool, name, Type),
+    OperatorAnnotation(name, Type),
+    FunctionDeclr(name, Vec<Pattern>, Expression<name,annot>),
+    OperatorDeclr(name, Vec<Pattern>, Expression<name,annot>),
     OperatorPrioDeclr {
-        location: Location,
-        function: Name,
-        name: Name,
+        function: name,
+        name: name,
         priority: OperPriority,
     },
 }
@@ -65,22 +65,20 @@ pub enum FunctionKind {
 }
 
 #[derive(Debug,Clone)]
-pub struct FunctionDeclaration {
+pub struct Function<name,annot> {
     pub annotation: Option<Type>,
     pub doc: Option<String>,
-    pub name: Name,
+    pub name: name,
     pub kind: FunctionKind,
     pub arguments: Vec<Pattern>,
-    pub body: Expression,
-    pub location: Location,
+    pub body: Expression<name,annot>,
 }
 
 #[derive(Debug,Clone)]
-pub struct PortDeclaration {
+pub struct Port<name> {
     pub annotation: Type,
     pub doc: Option<String>,
-    pub name: Name,
-    pub location: Location,
+    pub name: name,
 }
 
 #[derive(Debug,Clone)]
@@ -112,7 +110,6 @@ pub struct TypeDeclaration {
     pub type_variables: Vec<Name>,
     pub genre: TypeGenre,
     pub doc: Option<String>,
-    pub location: Location,
 }
 
 #[derive(Debug,Clone)]
@@ -172,14 +169,16 @@ pub enum Pattern {
     Decons(Vec<Pattern>),
 }
 
+pub type Expression<name,annot> = Anchored<Expression_<name,annot>,annot>;
+
 #[derive(Debug,Clone)]
-pub enum Expression {
+pub enum Expression_<name,annot> {
     Record {
-        updates: Option<Name>,
-        fields: Vec<(Name, Expression)>,
+        updates: Option<name>,
+        fields: Vec<(name, Expression<name,annot>)>,
     },
-    List(Vec<Expression>),
-    Tuple(Vec<Expression>),
+    List(Vec<Expression<name,annot>>),
+    Tuple(Vec<Expression<name,annot>>),
     StringLit(String),
     Character(String),
     Number(String),
@@ -187,69 +186,67 @@ pub enum Expression {
     EmptyRecord,
     EmptyList,
     IfThenElse {
-        condition: Box<Expression>,
-        then_branch: Box<Expression>,
-        else_branch: Box<Expression>,
+        condition: Box<Expression<name,annot>>,
+        then_branch: Box<Expression<name,annot>>,
+        else_branch: Box<Expression<name,annot>>,
     },
     LetIn {
-        declarations: Vec<LetDeclaration>,
-        expression: Box<Expression>
+        declarations: Vec<LetDeclaration<name,annot>>,
+        expression: Box<Expression<name,annot>>
     },
     /// case `condition` of (`branches`)
     CaseOf {
-        condition: Box<Expression>,
-        branches: Vec<(Location, Pattern, Expression)>,
+        condition: Box<Expression<name,annot>>,
+        branches: Vec<(Pattern, Expression<name,annot>)>,
     },
     Lambda {
         arguments: Vec<Pattern>,
-        body: Box<Expression>,
-        location: Location,
+        body: Box<Expression<name,annot>>,
     },
-    /// [(`Expression` `op`) (`Expression` `op`) ... `op`)] `trailing`
+    /// [(`Expression<name,annot>` `op`) (`Expression<name,annot>` `op`) ... `op`)] `trailing`
     InfixApplication {
-        prefixes: Vec<(Expression, Operator)>,
-        trailing: Box<Expression>,
+        prefixes: Vec<(Expression<name,annot>, name)>,
+        trailing: Box<Expression<name,annot>>,
     },
     /// A function application the list size is always equal or greater than
     /// 2, includes the function and the various arguments applied to it.
-    Application(Vec<Expression>),
-    Variable(Name),
+    Application(Vec<Expression<name,annot>>),
+    Variable(name),
     /// An operator surounded by `()` to make it prefix. Such as `(+)`
-    PrefixOperator(Operator),
+    PrefixOperator(name),
     /// the argument value is the size of the resulting tuple
     TupleConstructor(i16),
 }
 
 #[derive(Debug,Clone)]
-pub struct LetDeclaration {
+pub struct LetDeclaration<name,annot> {
     pub annotation: Option<Type>,
-    pub name: Option<Name>,
+    pub name: Option<name>,
     pub arguments: Vec<Pattern>,
-    pub body: Expression,
-    pub location: Location,
+    pub body: Expression<name,annot>,
 }
 
 #[derive(Debug,Clone)]
-pub struct ElmModule {
-    pub name: Option<Name>,
+pub struct Module<name,annot> {
+    pub name: Option<name>,
     pub exports: ExportList,
     pub doc: Option<String>,
-    pub imports: Vec<ElmImport>,
+    pub imports: Vec<Import>,
     pub types: Vec<TypeDeclaration>,
-    pub functions: Vec<FunctionDeclaration>,
+    pub functions: Vec<Function<name,annot>>,
     pub infixities: Vec<OperPriority>,
-    pub ports: Option<Vec<PortDeclaration>>,
+    pub ports: Option<Vec<Port<name>>>,
 }
 
-pub struct CoalecedTopDeclr {
-    pub ports: Vec<PortDeclaration>,
+pub struct CoalecedTopDeclr<name,annot> {
+    pub ports: Vec<Port<name>>,
     pub infixities: Vec<OperPriority>,
-    pub functions: Vec<FunctionDeclaration>,
+    pub functions: Vec<Function<name,annot>>,
     pub types: Vec<TypeDeclaration>,
 }
 
-pub fn into_tree<I>(declrs : I) -> CoalecedTopDeclr
-    where I:Iterator<Item=TopDeclr> + Sized
+pub fn into_tree<I,name,annot>(declrs : I) -> CoalecedTopDeclr<name,annot>
+    where I:Iterator<Item=TopDeclr<name,annot>> + Sized
 {
     use self::TopDeclr as TD;
 
@@ -266,42 +263,42 @@ pub fn into_tree<I>(declrs : I) -> CoalecedTopDeclr
         TD::DocComment(content) => {
             last_doc = Some(content);
         },
-        TD::TypeDeclr(location,TypeDeclr{name,type_variables,alternatives}) =>{
+        TD::TypeDeclr(TypeDeclr{name,type_variables,alternatives}) =>{
             let doc = last_doc.take();
             let genre = TypeGenre::Full(alternatives);
             types.push(TypeDeclaration {
-                name, type_variables, genre, doc, location
+                name, type_variables, genre, doc
             })
         },
-        TD::TypeAlias(location, TypeAlias{name, type_, type_variables}) => {
+        TD::TypeAlias(TypeAlias{name, type_, type_variables}) => {
             let doc = last_doc.take();
             let genre = TypeGenre::Alias(type_);
             types.push(TypeDeclaration {
-                name, type_variables, genre, doc, location
+                name, type_variables, genre, doc
             })
         },
-        TD::FunctionAnnotation(location, true, name, annotation) => {
+        TD::FunctionAnnotation(true, name, annotation) => {
             let doc = last_doc.take();
-            ports.push(PortDeclaration {doc, name, annotation, location})
+            ports.push(Port {doc, name, annotation})
         },
-        TD::FunctionAnnotation(_, false, _, type_)
+        TD::FunctionAnnotation(false, _, type_)
         | TD::OperatorAnnotation(_, type_) => {
             last_annotation = Some(type_);
         },
-        TD::FunctionDeclr(location, name, arguments, body) => {
+        TD::FunctionDeclr(name, arguments, body) => {
             let doc = last_doc.take();
             let kind = FunctionKind::Regular;
             let annotation = last_annotation.take();
-            functions.push(FunctionDeclaration {
-                annotation, doc, name, kind, arguments, location, body,
+            functions.push(Function {
+                annotation, doc, name, kind, arguments, body,
             })
         },
-        TD::OperatorDeclr(location, name, arguments, body) => {
+        TD::OperatorDeclr(name, arguments, body) => {
             let doc = last_doc.take();
             let kind = FunctionKind::Operator;
             let annotation = last_annotation.take();
-            functions.push(FunctionDeclaration {
-                annotation, doc, name, kind, arguments, location, body,
+            functions.push(Function {
+                annotation, doc, name, kind, arguments, body,
             })
         },
         TD::OperatorPrioDeclr { .. } => {

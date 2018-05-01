@@ -79,8 +79,8 @@ struct StreamParser<I: Iterator<Item=Loc<ElmToken>>> {
     input : OMG<I>,
     module_declr: Option<tree::ModuleDeclr>,
     module_doc: Option<String>,
-    module_imports: Vec<tree::ElmImport>,
-    top_levels: Vec<tree::TopDeclr>,
+    module_imports: Vec<tree::Import>,
+    top_levels: Vec<tree::TopDeclr<String,Location>>,
     stage: ParserStage,
 }
 
@@ -187,12 +187,13 @@ impl<I: Iterator<Item=Loc<ElmToken>>> StreamParser<I> {
         loop {
             if self.input.peek().is_none() {
                 break Ok(())
-            };
-            let next_toplevel_lex = lalrpopify!(self.input, filter_indent);
-            match TopDeclrParser::new().parse(next_toplevel_lex) {
-                Ok(val)        => self.top_levels.push(val),
-                Err(lrp_error) => break Err(lrp_error.into()),
-            };
+            } else {
+                let next_toplevel_lex = lalrpopify!(self.input, filter_indent);
+                match TopDeclrParser::new().parse(next_toplevel_lex) {
+                    Ok(val)        => self.top_levels.push(val),
+                    Err(lrp_error) => break Err(lrp_error.into()),
+                }
+            }
         }
     }
 
@@ -225,7 +226,7 @@ impl<I: Iterator<Item=Loc<ElmToken>>> StreamParser<I> {
         }
     }
 
-    fn into_tree(mut self) -> Result<tree::ElmModule,ParserError> {
+    fn into_tree(mut self) -> Result<tree::Module<String,Location>,ParserError> {
         self.evaluate_up_to(ParserStage::FullyParsed)?;
         let (name, exports) = match self.module_declr {
             Some(tree::ModuleDeclr {name, exports}) =>
@@ -240,7 +241,7 @@ impl<I: Iterator<Item=Loc<ElmToken>>> StreamParser<I> {
         } = tree::into_tree(self.top_levels.into_iter());
 
         let ports = if list_ports.is_empty() { None } else { Some(list_ports) };
-        Ok(tree::ElmModule {
+        Ok(tree::Module {
             name, exports, doc, imports, types, functions, infixities, ports
         })
     }
@@ -335,13 +336,13 @@ impl<I> Parser<I>
     }
 
     /// Returns the list of import declarations. Evaluating it if needed
-    pub fn imports(&mut self) -> &[tree::ElmImport] {
+    pub fn imports(&mut self) -> &[tree::Import] {
         self.0.evaluate_up_to(ParserStage::TopDeclrs).unwrap();
         &self.0.module_imports
     }
 
     /// Parse the whole file and return the complete parse tree.
-    pub fn into_parse_tree(self) -> tree::ElmModule {
+    pub fn into_parse_tree(self) -> tree::Module<String,Location> {
         self.0.into_tree().unwrap()
     }
 }

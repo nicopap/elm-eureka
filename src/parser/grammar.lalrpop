@@ -6,7 +6,8 @@ use super::tree;
 use self::tree::{
     TopDeclr,
     Expression,
-    ElmImport,
+    Expression_,
+    Import,
     ExportEntry,
     ExportList,
     ModuleDeclr,
@@ -16,10 +17,15 @@ use self::tree::{
     Type,
     TypeAlias,
     TypeDeclr,
-    Associativity
+    Associativity,
+    Anchored,
 };
 
 grammar;
+
+Spanned<Rule>: Anchored<Rule, tokens::Location> = {
+    <l: @L> <rule: Rule> <r: @R> => ((l,r),rule),
+};
 
 pub ModuleDeclr: Option<ModuleDeclr> = {
     NameTok "module" <name:NameTok>
@@ -49,14 +55,14 @@ ExportEntry: ExportEntry = {
 
 };
 
-pub Import: ElmImport = {
-    <location:@L> "import" <global_name:NameTok>
+pub Import: Import = {
+    "import" <global_name:NameTok>
     <local_name:("as" <NameTok>)?>
-    <exposes:("exposing" <ExportList>)?> => ElmImport{ <> },
+    <exposes:("exposing" <ExportList>)?> => Import{ <> },
 };
 
 
-pub TopDeclr: TopDeclr = {
+pub TopDeclr: TopDeclr<String,tokens::Location> = {
     "infixr" <precedence:NumberTok> <operator:OperatorTok> =>
         TopDeclr::OperPriority(OperPriority {
             associativity: Associativity::Right,
@@ -92,7 +98,6 @@ pub TopDeclr: TopDeclr = {
             operator : operator,
         }),
 
-    <location:@L>
     "infix" <kind:NameTok> <precedence:NumberTok> "(" <name:OperatorTok> ")"
     "=" <function:NameTok> => {
         let associativity = match kind.as_ref() {
@@ -111,32 +116,30 @@ pub TopDeclr: TopDeclr = {
                 u8::from_str(precedence.as_str())
                     .expect("Error reading precedence of infix operator"),
         };
-        TopDeclr::OperatorPrioDeclr { priority, function, location, name }
+        TopDeclr::OperatorPrioDeclr { priority, function, name }
     },
 
-    <loc:@L>
     "type" <name:NameTok> <type_variables:NameTok*> "="
     <first_alt:(<NameTok> <EnclosedType*>)>
     <next_alts:("|"<NameTok> <EnclosedType*>)*> => {
         let mut alternatives : Vec<(String, Vec<Type>)> = next_alts;
         alternatives.insert(0,first_alt);
-        TopDeclr::TypeDeclr(loc, TypeDeclr{name,type_variables,alternatives})
+        TopDeclr::TypeDeclr(TypeDeclr{name,type_variables,alternatives})
     },
 
-    <loc:@L>
     "type" "alias" <name:NameTok> <type_variables:NameTok*> "=" <type_:Type> =>
-        TopDeclr::TypeAlias(loc, TypeAlias{name, type_variables, type_}),
+        TopDeclr::TypeAlias(TypeAlias{name, type_variables, type_}),
 
-    <@L> "(" <OperatorTok> ")" <EnclosedPattern*> "=" <Expression> =>
+    "(" <OperatorTok> ")" <EnclosedPattern*> "=" <Expression> =>
         TopDeclr::OperatorDeclr(<>),
 
-    <loc:@L> <p:"port"?> <name:NameTok> ":" <type_:Type> =>
-        TopDeclr::FunctionAnnotation(loc, p.is_some(), name,  type_),
+    <p:"port"?> <name:NameTok> ":" <type_:Type> =>
+        TopDeclr::FunctionAnnotation(p.is_some(), name,  type_),
 
     "(" <OperatorTok> ")" ":" <Type> =>
         TopDeclr::OperatorAnnotation(<>),
 
-    <@L> <NameTok> <EnclosedPattern*> "=" <Expression> =>
+    <NameTok> <EnclosedPattern*> "=" <Expression> =>
         TopDeclr::FunctionDeclr(<>),
 
     <DocCommentTok> => TopDeclr::DocComment(<>),
@@ -234,74 +237,78 @@ EnclosedPattern: Pattern = {
 
 };
 
-Expression: Expression = {
+Expression: Expression<String,tokens::Location> = Spanned<RawExpression>;
+RawExpression: Expression_<String,tokens::Location> = {
     <prefixes:(<ApplicationExpression> <OperatorTok>)+>
     <trailing:OpenExpression> =>
-        Expression::InfixApplication{prefixes, trailing:Box::new(trailing)},
+        Expression_::InfixApplication{prefixes, trailing:Box::new(trailing)},
 
-    OpenExpression => <>,
+    RawOpenExpression => <>,
 };
 
-EsacExpression: Expression = {
+CaseExpression: Expression<String,tokens::Location> = Spanned<RawCaseExpression>;
+RawCaseExpression: Expression_<String,tokens::Location> = {
     <prefixes:(<ApplicationExpression> <OperatorTok>)+>
-    <trailing:EsacOpenExpression> =>
-        Expression::InfixApplication{prefixes, trailing:Box::new(trailing)},
+    <trailing:CaseOpenExpression> =>
+        Expression_::InfixApplication{prefixes, trailing:Box::new(trailing)},
 
-    EsacOpenExpression => <>,
+    RawCaseOpenExpression => <>,
 };
 
-EsacOpenExpression: Expression = {
+CaseOpenExpression: Expression<String,tokens::Location> = Spanned<RawCaseOpenExpression>;
+RawCaseOpenExpression: Expression_<String,tokens::Location> = {
     "case" <condition:Expression> "of"
-    <init:(<@L> <Pattern> "->" <EsacExpression> "case indent")*>
-    <last:(<@L> <Pattern> "->" <EsacExpression>)> "endcase" => {
+    <init:(<Pattern> "->" <CaseExpression> "case indent")*>
+    <last:(<Pattern> "->" <CaseExpression>)> "endcase" => {
         let mut branches = init;
         branches.push(last);
-        Expression::CaseOf{condition:Box::new(condition), branches}
+        Expression_::CaseOf{condition:Box::new(condition), branches}
     },
 
-    "lambda" <location:@L> <arguments:EnclosedPattern+> "->"
-    <body:EsacExpression>  =>
-        Expression::Lambda{location, arguments, body:Box::new(body)},
+    "lambda" <arguments:EnclosedPattern+> "->"
+    <body:CaseExpression>  =>
+        Expression_::Lambda{arguments, body:Box::new(body)},
 
     "if" <ife:Expression>
     "then" <thene:Expression>
-    "else" <elsee:EsacExpression> =>
-        Expression::IfThenElse {
+    "else" <elsee:CaseExpression> =>
+        Expression_::IfThenElse {
             condition: Box::new(ife),
             then_branch: Box::new(thene),
             else_branch: Box::new(elsee)
         },
 
     "let" <init:(<LetDeclaration> "let indent")*> <last:LetDeclaration>
-    "in" <in_expr:EsacExpression> => {
+    "in" <in_expr:CaseExpression> => {
         let mut declarations = init;
         declarations.push(last);
-        Expression::LetIn {
+        Expression_::LetIn {
             declarations,
             expression: Box::new(in_expr)
         }
     },
 
-    ApplicationExpression => <>,
+    RawApplicationExpression => <>,
 };
 
-OpenExpression: Expression = {
+OpenExpression: Expression<String,tokens::Location> = Spanned<RawOpenExpression>;
+RawOpenExpression: Expression_<String,tokens::Location> = {
     "case" <condition:Expression> "of"
-    <init:(<@L> <Pattern> "->" <EsacExpression> "case indent")*>
-    <last:(<@L> <Pattern> "->" <EsacExpression>)> => {
+    <init:(<Pattern> "->" <CaseExpression> "case indent")*>
+    <last:(<Pattern> "->" <CaseExpression>)> => {
         let mut branches = init;
         branches.push(last);
-        Expression::CaseOf{condition:Box::new(condition), branches}
+        Expression_::CaseOf{condition:Box::new(condition), branches}
     },
 
-    "lambda" <location:@L> <arguments:EnclosedPattern+> "->"
+    "lambda" <arguments:EnclosedPattern+> "->"
     <body:Expression>  =>
-        Expression::Lambda{location, arguments, body:Box::new(body)},
+        Expression_::Lambda{arguments, body:Box::new(body)},
 
     "if" <ife:Expression>
     "then" <thene:Expression>
     "else" <elsee:Expression> =>
-        Expression::IfThenElse {
+        Expression_::IfThenElse {
             condition: Box::new(ife),
             then_branch: Box::new(thene),
             else_branch: Box::new(elsee)
@@ -311,84 +318,87 @@ OpenExpression: Expression = {
     "in" <in_expr:Expression> => {
         let mut declarations = init;
         declarations.push(last);
-        Expression::LetIn {
+        Expression_::LetIn {
             declarations,
             expression: Box::new(in_expr)
         }
     },
 
-    ApplicationExpression => <>,
+    RawApplicationExpression => <>,
 };
 
-ApplicationExpression: Expression = {
+ApplicationExpression: Expression<String,tokens::Location> = Spanned<RawApplicationExpression>;
+RawApplicationExpression: Expression_<String,tokens::Location> = {
     <head:ClosedExpression> <tail:ClosedExpression+> => {
         let mut expressions = tail;
         expressions.insert(0,head);
-        Expression::Application(expressions)
+        Expression_::Application(expressions)
     },
 
-    ClosedExpression => <>,
+    RawClosedExpression => <>,
 };
 
-ClosedExpression: Expression = {
+ClosedExpression: Expression<String,tokens::Location> = Spanned<RawClosedExpression>;
+RawClosedExpression: Expression_<String,tokens::Location> = {
     "{" <updates:(<NameTok> "|")?>
     <fields:Comma<(<NameTok> "=" <Expression>)>> "}" =>
-        Expression::Record{<>},
+        Expression_::Record{<>},
 
     "[" <Comma<Expression>> "]" =>
-        Expression::List(<>),
+        Expression_::List(<>),
 
     "(" <entries:(<Expression> ",")+> <last:Expression> ")" => {
         let mut entries = entries;
         entries.push(last);
-        Expression::Tuple(entries)
+        Expression_::Tuple(entries)
     },
 
     "(" <commas:","+> ")" =>
-        Expression::TupleConstructor((commas.len() + 1) as i16),
+        Expression_::TupleConstructor((commas.len() + 1) as i16),
 
-    "{" "}" => Expression::EmptyRecord,
-    "[" "]" => Expression::EmptyList,
-    "(" ")" => Expression::UnitType,
-    "(" <Expression> ")" => <>,
-    StringTok => Expression::StringLit(<>),
-    NumberTok => Expression::Number(<>),
-    CharTok => Expression::Character(<>),
-    "(" <OperatorTok> ")" => Expression::PrefixOperator(<>),
-    NameTok => Expression::Variable(<>),
+    "{" "}" => Expression_::EmptyRecord,
+    "[" "]" => Expression_::EmptyList,
+    "(" ")" => Expression_::UnitType,
+    "(" <RawExpression> ")" => <>,
+    StringTok => Expression_::StringLit(<>),
+    NumberTok => Expression_::Number(<>),
+    CharTok => Expression_::Character(<>),
+    "(" <OperatorTok> ")" => Expression_::PrefixOperator(<>),
+    NameTok => Expression_::Variable(<>),
 };
 
-LetDeclaration: LetDeclaration = {
+LetDeclaration: LetDeclaration<String,tokens::Location> = {
     <annotation:(<NameTok> ":" <Type> "let indent")?>
-    <location:@L> <name:NameTok> <arguments:EnclosedPattern+> "="
+    <name:NameTok> <arguments:EnclosedPattern+> "="
     <body:Expression> => {
         match annotation {
             Some((annot_name, maybe_annotation)) => {
                 if annot_name != name {
+                    // TODO: error handling
                     panic!("Type annotation name in let expression doesn't \
                            match the function declaration it is annotating")
                 }
                 let annotation = Some(maybe_annotation);
                 LetDeclaration{
                     name: Some(name),
-                    annotation, arguments, body, location
+                    annotation, arguments, body
                 }
             },
             None =>
                 LetDeclaration{
                     name: Some(name),
                     annotation: None,
-                    arguments, body, location
+                    arguments, body
                 },
         }
     },
 
     <annotation:(NameTok ":" <Type> "let indent")?>
-    <location:@L> <pattern:EnclosedPattern> "=" <body:Expression> =>
+    <pattern:EnclosedPattern> "=" <body:Expression> =>
         LetDeclaration{
             name: None,
             arguments: vec![pattern],
-            annotation, body, location,
+            annotation, body,
         },
 };
 

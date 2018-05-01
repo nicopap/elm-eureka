@@ -3,8 +3,8 @@
 use test::{Bencher,black_box};
 
 use super::Parser;
-use super::tree::Expression as Expr;
-use super::tree::ElmModule;
+use super::tree::Expression_ as Expr;
+use super::tree::Module;
 
 
 // Should succesfully compile the compilation of examples available in
@@ -18,7 +18,7 @@ use super::tree::ElmModule;
 // if the file was correctly parsed.
 #[test] fn small_file_test_validity() {
     let source_txt = include_str!("elm_samples/small_file_test.elm").to_owned();
-    let ElmModule {name, doc, imports, types, functions,
+    let Module {name, doc, imports, types, functions,
         infixities, ports, ..} = Parser::new(source_txt.chars()).into_parse_tree();
     assert_eq!(name, Some("ModuleName".to_owned()));
     assert_eq!(doc, Some(" module doc ".to_owned()));
@@ -32,7 +32,7 @@ use super::tree::ElmModule;
 // Should be able to parse the "hello world" example provided at elm-lang.org
 #[test] fn hello_world_test() {
     let source_txt = include_str!("elm_samples/no_head.elm").to_owned();
-    let ElmModule {name, doc, mut imports, types, mut functions,
+    let Module {name, doc, mut imports, types, mut functions,
         infixities, ports, ..} = Parser::new(source_txt.chars()).into_parse_tree();
     let only_function = functions.pop().expect(
         "There should be a function in the hello world file");
@@ -44,9 +44,9 @@ use super::tree::ElmModule;
     assert_eq!(types.len(), 0);
     assert_eq!(&only_function.name, "main");
 
-    if let Expr::Application(mut only_function_app) = only_function.body {
-        if let Some(Expr::StringLit(hello_str)) = only_function_app.pop() {
-            if let Some(Expr::Variable(fn_name)) = only_function_app.pop() {
+    if let (_,Expr::Application(mut only_function_app)) = only_function.body {
+        if let Some((_,Expr::StringLit(hello_str))) = only_function_app.pop() {
+            if let Some((_,Expr::Variable(fn_name))) = only_function_app.pop() {
                 assert_eq!((fn_name.as_ref(),hello_str.as_ref()), ("text", "Hello, World!"))
             } else {
                 panic!("The first element of the application wasn't a simple \
