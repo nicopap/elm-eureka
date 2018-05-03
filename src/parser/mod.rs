@@ -1,4 +1,4 @@
-//! An efficient implementation of an elm parser
+//! An implementation of an elm parser
 pub mod tree;
 mod grammar;
 mod streamed;

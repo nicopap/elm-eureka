@@ -1,11 +1,10 @@
 //! Query informations about an elm project
 
 use std::fs::{File, read_dir};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::error::Error;
-use itertools::Itertools;
 
+use fxhash::FxHashMap;
 use walkdir::WalkDir;
 use serde_json::{Value, from_reader};
 use serde_json::map::Map;
@@ -17,10 +16,10 @@ pub struct PackageInfo {
     pub project_dir : PathBuf,
     /// A map of module names to the location of the name
     /// relative to the root of the project.
-    pub dependencies: HashMap<String, PathBuf>,
+    pub dependencies: FxHashMap<String, PathBuf>,
     /// the source files of the elm package, paths are relative to the
     /// project root
-    pub source_files: HashMap<String, PathBuf>,
+    pub source_files: FxHashMap<String, PathBuf>,
 }
 
 // Shortcut to cut some syntax cruft
@@ -38,6 +37,9 @@ macro_rules! strip_x {
 /// # Panics
 /// This function may panic, typically if there is
 /// an IO read error.
+// TODO: use elm-stuff/exact-dependencies.json to solve dependencies.
+// TODO: less unwrap()
+// TODO: use `modules` module for data
 pub fn info(root_dir : &Path) -> Result<PackageInfo, Box<Error>> {
     let project_dir = root_dir.to_path_buf();
     let foreign_dir = project_dir.join("elm-stuff/packages");
@@ -54,7 +56,7 @@ pub fn info(root_dir : &Path) -> Result<PackageInfo, Box<Error>> {
             .map(|ref x| last_version(x))
             .flat_map(|ref x|  all_exposed_modules(x))
             .map(|(n,p)| (n, strip_x!(p, project_dir)))
-            .collect::<HashMap<String, PathBuf>>();
+            .collect::<FxHashMap<String, PathBuf>>();
 
     let source_files =
         value["source-directories"]
@@ -72,7 +74,7 @@ pub fn info(root_dir : &Path) -> Result<PackageInfo, Box<Error>> {
                         (module_name, strip_x!(source, project_dir))
                     )
             )
-            .collect::<HashMap<String, PathBuf>>();
+            .collect::<FxHashMap<String, PathBuf>>();
 
     Ok(PackageInfo {dependencies, source_files, project_dir})
 }
@@ -95,10 +97,10 @@ fn all_modules(dir :&Path) -> Vec<(String, PathBuf)> {
                         .replace('/',".")
                         .trim_right_matches(".elm")
                 );
-                Some(vec![( module_name, entry_path)])
+                Some(( module_name, entry_path))
             } else { None }
         })
-        .flatten().collect()
+        .collect()
 }
 
 // In a directory `path` containing directories which names are based on
