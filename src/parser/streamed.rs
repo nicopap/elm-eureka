@@ -199,7 +199,7 @@ impl<I: Iterator<Item=Loc<ElmToken>>> StreamParser<I> {
 
     /// Parse the file up to the given stage, or not at all if that stage
     /// was already reached.
-    fn evaluate_up_to(&mut self, stage: ParserStage) -> Result<(),ParserError> {
+    fn parse_up_to(&mut self, stage: ParserStage) -> Result<(),ParserError> {
         use self::ParserStage as SG;
         macro_rules! next_n {
             ($($count:tt ).+ ; $to_next:tt) => ({
@@ -227,7 +227,7 @@ impl<I: Iterator<Item=Loc<ElmToken>>> StreamParser<I> {
     }
 
     fn into_tree(mut self) -> Result<tree::Module<String,Location>,ParserError> {
-        self.evaluate_up_to(ParserStage::FullyParsed)?;
+        self.parse_up_to(ParserStage::FullyParsed)?;
         let (name, exports) = match self.module_declr {
             Some(tree::ModuleDeclr {name, exports}) =>
                 (Some(name), exports),
@@ -304,7 +304,7 @@ impl<I> Parser<I>
     /// assert_eq!(declaration.name, "My.Great.Module".to_owned());
     /// ```
     pub fn module_declaration(&mut self) -> Option<&tree::ModuleDeclr<String,Location>> {
-        self.0.evaluate_up_to(ParserStage::ModuleDoc).unwrap();
+        self.0.parse_up_to(ParserStage::ModuleDoc).unwrap();
         self.0.module_declr.as_ref()
     }
 
@@ -331,19 +331,107 @@ impl<I> Parser<I>
     /// assert_eq!(docs, &Some(String::from(" Some useful informations\n")));
     /// ```
     pub fn module_doc(&mut self) -> &Option<String> {
-        self.0.evaluate_up_to(ParserStage::Imports).unwrap();
+        self.0.parse_up_to(ParserStage::Imports).unwrap();
         &self.0.module_doc
     }
 
     /// Returns the list of import declarations. Evaluating it if needed
     pub fn imports(&mut self) -> &[tree::Import<String,Location>] {
-        self.0.evaluate_up_to(ParserStage::TopDeclrs).unwrap();
+        self.0.parse_up_to(ParserStage::TopDeclrs).unwrap();
         &self.0.module_imports
     }
 
     /// Parse the whole file and return the complete parse tree.
     pub fn into_parse_tree(self) -> tree::Module<String,Location> {
         self.0.into_tree().unwrap()
+    }
+
+    /// Returns the list of ALL exported symbols. If the module declaration
+    /// is missing or exposes everything unqualified, then reads the rest
+    /// of the file to find all the declared symbols.
+    /// Please mind that no guarantee is made as for the ordering of the output
+    pub fn exports(&mut self) -> Vec<&str> {
+        use self::tree::{
+            ModuleDeclr,
+            ExportList as EL,
+            ExportEntry_ as EE,
+            TopDeclr as TD,
+            TypeGenre_ as TG,
+        };
+
+        let mut ret : Vec<&str> = Vec::new();
+        let mut types_lookup : Vec<String> = Vec::new();
+
+        self.0.parse_up_to(ParserStage::ModuleDoc).unwrap();
+
+        // Look if there is any types exporting constructors unqualified.
+        if let Some(
+            ModuleDeclr{exports:EL::List(ref entries),..}
+        ) = self.0.module_declr {
+            for &(_,ref entry) in entries.iter() {
+                if let &EE::WithAllConstructors(ref name) = entry {
+                    types_lookup.push((*name).clone());
+                }
+            }
+        };
+        if types_lookup.len() > 0 {
+            self.0.parse_up_to(ParserStage::FullyParsed).unwrap();
+        }
+
+        // Add symbols to the return vector
+        if let Some(
+            ModuleDeclr{exports:EL::List(ref entries),..}
+        ) = self.0.module_declr {
+            for &(_,ref entry) in entries.iter() {
+                match entry {
+                    &EE::Name(ref name) | &EE::Operator(ref name) => {
+                        ret.push(name);
+                    },
+                    &EE::WithConstructors(ref name, ref constr) => {
+                        ret.push(name);
+                        constr.iter().for_each(|name| ret.push(name));
+                    },
+                    &EE::WithAllConstructors(ref name) => {
+                        // We can look up the corresponding constructors
+                        // in the parse tree because we checked that earlier
+                        // and parsed accordingly.
+                        for top_declr in self.0.top_levels.iter() {
+                            if let &TD::Type((_,
+                                TG::Full {ref name, ref alternatives, ..}
+                            )) = top_declr {
+                                if types_lookup.contains(&name) {
+                                    ret.push(name);
+                                    for &(_,(ref name,_)) in alternatives.iter() {
+                                        ret.push(name)
+                                    }
+                                }
+                            }
+                        }
+                    },
+                }
+            }
+        // If the export is unqualified or doesn't exist, we export everything
+        // by default.
+        } else {
+            self.0.parse_up_to(ParserStage::FullyParsed).unwrap();
+            self.0.top_levels.iter().for_each(|top_declr| {
+                match top_declr {
+                    &TD::FunctionDeclr {ref name, ..}
+                    | &TD::OperatorDeclr {ref name, ..}
+                    | &TD::Type((_,TG::Alias {ref name, ..})) => {
+                        ret.push(name);
+                    },
+                    &TD::Type((_,TG::Full{ref name, ref alternatives,..})) => {
+                        ret.push(name);
+                        for &(_,(ref name,_)) in alternatives {
+                            ret.push(name);
+                        }
+                    },
+                    _ => {},
+                }
+            })
+        };
+        ret
     }
 }
 

@@ -8,14 +8,16 @@ use super::tree::{Expression_ as Expr, Module, Literal};
 
 // Should succesfully compile the compilation of examples available in
 // small_indent_test.elm
-#[test] fn small_indent_test_parses() {
+#[test]
+fn small_indent_test_parses() {
     let source_txt = include_str!("../../examples/small_indent_test.elm").to_owned();
     let _parser = Parser::new(source_txt.chars()).into_parse_tree();
 }
 
 // Should succesfully compile `small_file_test.elm`, tests approximatively
 // if the file was correctly parsed.
-#[test] fn small_file_test_validity() {
+#[test]
+fn small_file_test_validity() {
     let source_txt = include_str!("elm_samples/small_file_test.elm").to_owned();
     let Module {name, doc, imports, types, functions,
         infixities, ports, ..} = Parser::new(source_txt.chars()).into_parse_tree();
@@ -29,7 +31,8 @@ use super::tree::{Expression_ as Expr, Module, Literal};
 }
 
 // Should be able to parse the "hello world" example provided at elm-lang.org
-#[test] fn hello_world_test() {
+#[test]
+fn hello_world_test() {
     let source_txt = include_str!("elm_samples/no_head.elm").to_owned();
     let Module {name, doc, mut imports, types, mut functions,
         infixities, ports, ..} = Parser::new(source_txt.chars()).into_parse_tree();
@@ -62,7 +65,20 @@ use super::tree::{Expression_ as Expr, Module, Literal};
     assert!(ports.is_none());
 }
 
-#[bench] fn elmjutsu_parsetime(bench : &mut Bencher) {
+// TODO: make test result position independent (easy but tedious)
+#[test]
+fn parser_exported_names() {
+    let no_head = include_str!("elm_samples/unordered_list.elm").to_owned();
+    let mut no_head_parser = Parser::new(no_head.chars());
+    assert_eq!(no_head_parser.exports(), &["main"]);
+
+    let all_constr = include_str!("elm_samples/small_file_test.elm").to_owned();
+    let mut all_constr_parser = Parser::new(all_constr.chars());
+    assert_eq!(all_constr_parser.exports(), &["g","f","Type1","Alt1","Alt2"]);
+}
+
+#[bench]
+fn elmjutsu_parsetime(bench : &mut Bencher) {
     let source_txt = include_str!("../../examples/elmjutsu-5k.elm");
     bench.iter(|| {
         let owned_txt = source_txt.to_owned();
@@ -70,3 +86,4 @@ use super::tree::{Expression_ as Expr, Module, Literal};
         black_box({parser.into_parse_tree();()})
     })
 }
+

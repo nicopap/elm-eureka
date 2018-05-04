@@ -38,6 +38,7 @@ pub struct Import<name,annot> {
     pub global_name: name,
     pub local_name: Option<name>,
     pub exposes: Option<ExportList<name,annot>>,
+    pub annot: annot,
 }
 
 #[derive(Debug,Clone)]
@@ -45,10 +46,22 @@ pub enum TopDeclr<name,annot> {
     OperPriority(OperPriority<name>),
     DocComment(String),
     Type(TypeGenre<name>),
-    FunctionAnnotation(bool, name, Type<name>),
+    FunctionAnnotation {
+        is_port: bool,
+        name: name,
+        annotation: Type<name>,
+    },
     OperatorAnnotation(name, Type<name>),
-    FunctionDeclr(name, Vec<Pattern<name,annot>>, Expression<name,annot>),
-    OperatorDeclr(name, Vec<Pattern<name,annot>>, Expression<name,annot>),
+    FunctionDeclr {
+        name: name,
+        arguments: Vec<Pattern<name,annot>>,
+        body: Expression<name,annot>,
+    },
+    OperatorDeclr {
+        name: name,
+        arguments: Vec<Pattern<name,annot>>,
+        body: Expression<name,annot>,
+    },
     OperatorPrioDeclr {
         function: name,
         name: name,
@@ -255,15 +268,15 @@ pub fn into_tree<I,name,annot>(declrs : I) -> CoalecedTopDeclr<name,annot>
             let doc = last_doc.take();
             types.push((doc,genre))
         },
-        TD::FunctionAnnotation(true, name, annotation) => {
+        TD::FunctionAnnotation{is_port:true, name, annotation} => {
             let doc = last_doc.take();
             ports.push(Port {doc, name, annotation})
         },
-        TD::FunctionAnnotation(false, _, type_)
-        | TD::OperatorAnnotation(_, type_) => {
-            last_annotation = Some(type_);
+        TD::FunctionAnnotation{is_port:false, annotation,..}
+        | TD::OperatorAnnotation(_, annotation) => {
+            last_annotation = Some(annotation);
         },
-        TD::FunctionDeclr(name, arguments, body) => {
+        TD::FunctionDeclr{name, arguments, body} => {
             let doc = last_doc.take();
             let kind = FunctionKind::Regular;
             let annotation = last_annotation.take();
@@ -271,7 +284,7 @@ pub fn into_tree<I,name,annot>(declrs : I) -> CoalecedTopDeclr<name,annot>
                 annotation, doc, name, kind, arguments, body,
             })
         },
-        TD::OperatorDeclr(name, arguments, body) => {
+        TD::OperatorDeclr{name, arguments, body} => {
             let doc = last_doc.take();
             let kind = FunctionKind::Operator;
             let annotation = last_annotation.take();

@@ -1,4 +1,4 @@
-module ModuleName exposing (g,f)
+module ModuleName exposing (g,f,Type1(..))
 
 {-| module doc -}
 

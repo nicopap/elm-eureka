@@ -60,9 +60,14 @@ RawExportEntry: ExportEntry_<String> = {
 };
 
 pub Import: Import<String,tokens::Location> = {
-    "import" <global_name:NameTok>
+    <l:@L> "import" <global_name:NameTok>
     <local_name:("as" <NameTok>)?>
-    <exposes:("exposing" <ExportList>)?> => Import{ <> },
+    <exposes:("exposing" <ExportList>)?> <r:@R> => Import {
+        annot: (l,r),
+        global_name,
+        local_name,
+        exposes,
+    },
 };
 
 
@@ -146,17 +151,19 @@ pub TopDeclr: TopDeclr<String,tokens::Location> = {
             TypeGenre_::Alias { name, type_variables, type_ }
         )),
 
-    "(" <OperatorTok> ")" <EnclosedPattern*> "=" <Expression> =>
-        TopDeclr::OperatorDeclr(<>),
+    "(" <name:OperatorTok> ")" <arguments:EnclosedPattern*> "=" <body:Expression> =>
+        TopDeclr::OperatorDeclr{<>},
 
-    <p:"port"?> <name:NameTok> ":" <type_:Type> =>
-        TopDeclr::FunctionAnnotation(p.is_some(), name,  type_),
+    <p:"port"?> <name:NameTok> ":" <annotation:Type> =>
+        TopDeclr::FunctionAnnotation {
+            is_port:p.is_some(), name,  annotation
+        },
 
     "(" <OperatorTok> ")" ":" <Type> =>
         TopDeclr::OperatorAnnotation(<>),
 
-    <NameTok> <EnclosedPattern*> "=" <Expression> =>
-        TopDeclr::FunctionDeclr(<>),
+    <name:NameTok> <arguments:EnclosedPattern*> "=" <body:Expression> =>
+        TopDeclr::FunctionDeclr{<>},
 
     <DocCommentTok> => TopDeclr::DocComment(<>),
 };

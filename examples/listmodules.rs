@@ -22,7 +22,7 @@ struct ModuleMessage {
     module_name: String,
     name: Option<String>,
     doc: Option<String>,
-    exports: tree::ExportList<String,Location>,
+    exports: Vec<String>,
     imports: Vec<tree::Import<String,Location>>,
 }
 
@@ -34,7 +34,8 @@ fn parse_and_feedback(
         let file = File::open(source_path).unwrap();
         let char_stream = BufReader::new(file).chars().map(|x| x.unwrap());
         let mut parser = Parser::new(char_stream);
-        let tree::Module{exports,imports,name,doc,..} = parser.into_parse_tree();
+        let exports : Vec<String> = parser.exports().into_iter().map(str::to_string).collect();
+        let tree::Module{imports,name,doc,..} = parser.into_parse_tree();
         match send.send(
             Some(ModuleMessage{module_name, name,doc,exports,imports})
         ) {
@@ -83,18 +84,14 @@ pub fn main() {
                         .map(|x| x.chars().take_while(|&c| c != '\n').collect())
                         .unwrap_or_else(|| "No docstrings :(".to_owned());
 
-                let module_exports = match exports {
-                    tree::ExportList::Unqualified => "unqualified".to_owned(),
-                    tree::ExportList::List(ref exports) => format!("{:?}", exports),
-                };
                 let module_imports = format!("{:?}", imports);
                 println!("
                     #### {} ####
                     name: {:?}
-                    exports: {}
+                    exports: {:?}
                     has doc: {}
                     imports: {}
-                    ", module_name, &name, module_exports,
+                    ", module_name, &name, exports,
                     module_doc,
                     module_imports
                 );
