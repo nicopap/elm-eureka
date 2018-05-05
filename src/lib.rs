@@ -145,6 +145,7 @@ extern crate lalrpop_util;
 
 pub mod packages_reader;
 mod tokens;
+mod unsugar;
 pub mod lexer;
 pub mod parser;
 pub use tokens::ElmToken;
