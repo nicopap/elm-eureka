@@ -18,3 +18,23 @@ quick_error! {
         }
     }
 }
+
+quick_error! {
+    #[derive(Debug,PartialEq)]
+    pub enum Module {
+        Inexistant {
+            description("Attempt to import from a moduel that doesn't exist!")
+        }
+        UnexposedImport {
+            description("Attempt to import a symbol from a module that \
+                        doesn't export that symbol")
+        }
+        PathImport {
+            description("Use of A.Path in an import list")
+        }
+        Unsuported {
+            description("The use of unqualified type constructor imports \
+                        is currently not supported in this compiler :(")
+        }
+    }
+}

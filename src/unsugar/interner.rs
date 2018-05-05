@@ -23,4 +23,15 @@ impl Interner {
         where T:Into<String> + AsRef<str> {
         self.0.get_or_intern(name)
     }
+
+    pub fn resolve_name(&self, symbol: Symbol) -> Option<&str> {
+        self.0.resolve(symbol)
+    }
+
+    pub fn resolve_path(&self, symbols: &[Symbol]) -> Option<String> {
+        symbols.iter()
+            .map(|&symbol| self.resolve_name(symbol))
+            .collect::<Option<Vec<&str>>>()
+            .map(|value_list| value_list.join("."))
+    }
 }

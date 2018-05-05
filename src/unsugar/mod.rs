@@ -4,3 +4,4 @@ mod scopedname;
 mod elmscope;
 mod errors;
 mod interner;
+mod convert;
