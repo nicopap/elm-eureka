@@ -1,6 +1,7 @@
 //! A lazily evaluated parser
 use std::iter::{SkipWhile,Peekable};
 
+use fxhash::FxHashSet;
 use lalrpop_util::ParseError as LalrpopError;
 use itertools::{Coalesce,Itertools};
 
@@ -350,7 +351,7 @@ impl<I> Parser<I>
     /// is missing or exposes everything unqualified, then reads the rest
     /// of the file to find all the declared symbols.
     /// Please mind that no guarantee is made as for the ordering of the output
-    pub fn exports(&mut self) -> Vec<&str> {
+    pub fn exports(&mut self) -> FxHashSet<&str> {
         use self::tree::{
             ModuleDeclr,
             ExportList as EL,
@@ -359,8 +360,8 @@ impl<I> Parser<I>
             TypeGenre_ as TG,
         };
 
-        let mut ret : Vec<&str> = Vec::new();
-        let mut types_lookup : Vec<String> = Vec::new();
+        let mut ret : FxHashSet<&str> = FxHashSet::default();
+        let mut types_lookup = false;
 
         self.0.parse_up_to(ParserStage::ModuleDoc).unwrap();
 
@@ -369,12 +370,13 @@ impl<I> Parser<I>
             ModuleDeclr{exports:EL::List(ref entries),..}
         ) = self.0.module_declr {
             for &(_,ref entry) in entries.iter() {
-                if let &EE::WithAllConstructors(ref name) = entry {
-                    types_lookup.push((*name).clone());
+                if let &EE::WithAllConstructors(_) = entry {
+                    types_lookup = true;
+                    break
                 }
             }
         };
-        if types_lookup.len() > 0 {
+        if types_lookup {
             self.0.parse_up_to(ParserStage::FullyParsed).unwrap();
         }
 
@@ -385,13 +387,13 @@ impl<I> Parser<I>
             for &(_,ref entry) in entries.iter() {
                 match entry {
                     &EE::Name(ref name) | &EE::Operator(ref name) => {
-                        ret.push(name);
+                        ret.insert(name);
                     },
                     &EE::WithConstructors(ref name, ref constr) => {
-                        ret.push(name);
-                        constr.iter().for_each(|name| ret.push(name));
+                        ret.insert(name);
+                        constr.iter().for_each(|name| {ret.insert(name);});
                     },
-                    &EE::WithAllConstructors(ref name) => {
+                    &EE::WithAllConstructors(ref type_name) => {
                         // We can look up the corresponding constructors
                         // in the parse tree because we checked that earlier
                         // and parsed accordingly.
@@ -399,10 +401,10 @@ impl<I> Parser<I>
                             if let &TD::Type((_,
                                 TG::Full {ref name, ref alternatives, ..}
                             )) = top_declr {
-                                if types_lookup.contains(&name) {
-                                    ret.push(name);
+                                if name == type_name {
+                                    ret.insert(name);
                                     for &(_,(ref name,_)) in alternatives.iter() {
-                                        ret.push(name)
+                                        ret.insert(name);
                                     }
                                 }
                             }
@@ -419,12 +421,12 @@ impl<I> Parser<I>
                     &TD::FunctionDeclr {ref name, ..}
                     | &TD::OperatorDeclr {ref name, ..}
                     | &TD::Type((_,TG::Alias {ref name, ..})) => {
-                        ret.push(name);
+                        ret.insert(name);
                     },
                     &TD::Type((_,TG::Full{ref name, ref alternatives,..})) => {
-                        ret.push(name);
+                        ret.insert(name);
                         for &(_,(ref name,_)) in alternatives {
-                            ret.push(name);
+                            ret.insert(name);
                         }
                     },
                     _ => {},

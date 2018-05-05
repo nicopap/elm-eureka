@@ -1,10 +1,18 @@
 #![cfg(test)]
 
 use test::{Bencher,black_box};
+use fxhash::FxHashSet;
 
 use super::Parser;
 use super::tree::{Expression_ as Expr, Module, Literal};
 
+macro_rules! hash_set {
+    [$($value:expr),*] => ({
+        let mut ret = FxHashSet::default();
+        $(ret.insert($value);)*
+        ret
+    })
+}
 
 // Should succesfully compile the compilation of examples available in
 // small_indent_test.elm
@@ -65,16 +73,15 @@ fn hello_world_test() {
     assert!(ports.is_none());
 }
 
-// TODO: make test result position independent (easy but tedious)
 #[test]
 fn parser_exported_names() {
     let no_head = include_str!("elm_samples/unordered_list.elm").to_owned();
     let mut no_head_parser = Parser::new(no_head.chars());
-    assert_eq!(no_head_parser.exports(), &["main"]);
+    assert_eq!(no_head_parser.exports(), hash_set!["main"]);
 
     let all_constr = include_str!("elm_samples/small_file_test.elm").to_owned();
     let mut all_constr_parser = Parser::new(all_constr.chars());
-    assert_eq!(all_constr_parser.exports(), &["g","f","Type1","Alt1","Alt2"]);
+    assert_eq!(all_constr_parser.exports(), hash_set!["g","f","Type1","Alt1","Alt2"]);
 }
 
 #[bench]

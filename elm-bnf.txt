@@ -56,6 +56,9 @@ ENDCASE -- Implicit closing field of a case pattern branch list.
 
 # Nonterminal symbols
 
+GRAMMAR :=
+ /ModuleDeclr/ DocString N0 </Import/*> </TopDeclr/*>
+
 /ModuleDeclr/ :=
  Name module Name where { <Name = Name>+ } exposing /ExportList/ N0
  port module Name exposing /ExportList/ N0
