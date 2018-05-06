@@ -154,7 +154,7 @@ pub type Pattern<name,annot> = Anchored<Pattern_<name,annot>,annot>;
 pub enum Pattern_<name,annot> {
     ArgConstructor(name, Vec<Pattern<name,annot>>),
     Record(Vec<name>),
-    AliasBind(name, Box<Pattern<name,annot>>),
+    AliasBind(Box<Pattern<name,annot>>, name),
     Tuple(Vec<Pattern<name,annot>>),
     UnitType,
     Constructor(name),
@@ -301,3 +301,4 @@ pub fn into_tree<I,name,annot>(declrs : I) -> CoalecedTopDeclr<name,annot>
     CoalecedTopDeclr {ports, infixities, functions, types}
 }
 
+mod display {include!("tree-display.rs");}

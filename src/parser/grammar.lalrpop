@@ -240,7 +240,7 @@ RawEnclosedPattern: Pat<String,tokens::Location> = {
         Pat::Record(<>),
 
     "(" <p:Pattern> "as" <name:NameTok> ")" =>
-        Pat::AliasBind(name, Box::new(p)),
+        Pat::AliasBind(Box::new(p), name),
 
     "(" <entries:(<Pattern> ",")+> <last:Pattern> ")" => {
         let mut entries = entries;

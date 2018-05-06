@@ -1,10 +1,11 @@
 #![cfg(test)]
 
 use test::{Bencher,black_box};
-use fxhash::FxHashSet;
+use std::fmt::Write;
+use fxhash::{FxHashSet,FxHashMap};
 
 use super::Parser;
-use super::tree::{Expression_ as Expr, Module, Literal};
+use super::tree::{Expression_ as Expr, Module, Literal, Function};
 
 macro_rules! hash_set {
     [$($value:expr),*] => ({
@@ -71,6 +72,38 @@ fn hello_world_test() {
     }
     assert_eq!(infixities.len(), 0);
     assert!(ports.is_none());
+}
+
+#[test]
+fn odd_expressions_test() {
+    let source_txt = include_str!("elm_samples/odd_exprs.elm").to_owned();
+    let Module {functions, ..} =
+        Parser::new(source_txt.chars()).into_parse_tree();
+    let mut internal_rep = String::new();
+    for function in functions {
+        write!(internal_rep, "{}\n", function).unwrap();
+    }
+    const EXPECTED_REP : &'static str =
+r#"a  = case let y = () in y of () -> "hello world"
+
+b (_ as x) = x
+
+c  = if if 0 == 0 then 1 == 1 else 1 /= 1 then 100 else 3
+
+d : (number -> (List number))
+d  = (\v -> v * 4 |> (List.repeat 4))
+
+e : ((List number) -> (List number))
+e  = List.map <| (\v -> v * 4)
+
+f : (comparable -> Float -> Float)
+f  = (\x -> if x > 0 then (\v -> v * 10) else (\v -> v / 10))
+
+"#;
+    assert_eq!(
+        format!("{}", internal_rep),
+        EXPECTED_REP.to_owned(),
+    );
 }
 
 #[test]

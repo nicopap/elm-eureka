@@ -128,7 +128,7 @@ fn test_namespace() {
     insert_scope!(ctx, "Base", "List", "Maybe");
     assert_eq!(ctx.insert("Base"), Err(errors::Scope::AlreadyDefined));
 
-    let ctx = ctx.within_scope("SecondBase", |mut ctx| {
+    ctx.within_scope("SecondBase", |mut ctx| {
         insert_scope!(ctx, "Result", "List");
 
         assert_eq!(ctx.insert("Base"), Ok(()));
